@@ -19,6 +19,7 @@ require_once __DIR__ . '/Milestones.php';
 require_once __DIR__ . '/Issues.php';
 require_once __DIR__ . '/TimeEntries.php';
 require_once __DIR__ . '/TimeAggregates.php';
+require_once __DIR__ . '/Comments.php';
 
 final class Api
 {
@@ -29,6 +30,7 @@ final class Api
     private Issues $issues;
     private TimeEntries $timeEntries;
     private TimeAggregates $timeAggregates;
+    private Comments $comments;
 
     public function __construct(?Auth $auth = null, ?Database $db = null)
     {
@@ -39,6 +41,7 @@ final class Api
         $this->issues = new Issues($this->db);
         $this->timeEntries = new TimeEntries($this->db);
         $this->timeAggregates = new TimeAggregates($this->db);
+        $this->comments = new Comments($this->db);
     }
 
     /**
@@ -65,6 +68,14 @@ final class Api
                 return $this->kanbanAdd($method, $body);
             case 'kanban-move':
                 return $this->kanbanMove($method, $body);
+            case 'issue':
+                return $this->issue($method, $body);
+            case 'issue-update':
+                return $this->issueUpdate($method, $body);
+            case 'issue-time-add':
+                return $this->issueTimeAdd($method, $body);
+            case 'issue-comment-add':
+                return $this->issueCommentAdd($method, $body);
             case 'releases':
                 return $this->releases();
             case 'time':
@@ -341,6 +352,299 @@ final class Api
 
         $this->reorderWithin($to, $id, $index);
         return ['ok' => true];
+    }
+
+    /**
+     * Return the full detail payload for a single issue: the card
+     * itself (as rendered on the kanban board), plus its raw time
+     * entries and comments. Used by the task detail modal.
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private function issue(string $method, array $body): array
+    {
+        if ($method !== 'POST') {
+            throw new BadRequestException('issue requires POST');
+        }
+        $id = $this->readId($body);
+        $issue = $this->issues->find($id);
+        if ($issue === null) {
+            throw new BadRequestException('unknown issue');
+        }
+
+        $projectId = (int) $issue['project_id'];
+        $path = $this->projects->pathFor($projectId);
+
+        $milestoneName = null;
+        if ($issue['milestone_id'] !== null) {
+            $milestone = $this->milestones->find((int) $issue['milestone_id']);
+            if ($milestone !== null) {
+                $milestoneName = (string) $milestone['name'];
+            }
+        }
+
+        $agg = $this->timeAggregates->get(
+            TimeAggregates::SCOPE_ISSUE,
+            $id,
+            TimeAggregates::PERIOD_TOTAL,
+            '',
+            TimeAggregates::CATEGORY_ALL
+        );
+        $timeSpent = $agg !== null ? (float) $agg['hours'] : 0.0;
+
+        $entries = [];
+        foreach ($this->timeEntries->forIssue($id) as $row) {
+            $entries[] = [
+                'id'       => (int) $row['id'],
+                'spentOn'  => (string) $row['spent_on'],
+                'hours'    => (float) $row['hours'],
+                'category' => (string) $row['category'],
+                'note'     => $row['note'] !== null ? (string) $row['note'] : '',
+            ];
+        }
+
+        $comments = [];
+        foreach ($this->comments->forIssue($id) as $row) {
+            $comments[] = [
+                'id'        => (int) $row['id'],
+                'author'    => (string) $row['author'],
+                'body'      => (string) $row['body'],
+                'createdAt' => (string) $row['created_at'],
+            ];
+        }
+
+        return [
+            'issue' => [
+                'id'            => $id,
+                'title'         => (string) $issue['title'],
+                'description'   => $issue['description'] !== null ? (string) $issue['description'] : '',
+                'status'        => (string) $issue['status'],
+                'category'      => implode(self::CATEGORY_PATH_SEPARATOR, $path),
+                'categoryPath'  => $path,
+                'milestone'     => $milestoneName,
+                'workStarted'   => $issue['work_started_at'] !== null ? (string) $issue['work_started_at'] : null,
+                'workCompleted' => $issue['work_completed_at'] !== null ? (string) $issue['work_completed_at'] : null,
+                'timeSpent'     => $timeSpent,
+            ],
+            'timeEntries' => $entries,
+            'comments'    => $comments,
+        ];
+    }
+
+    /**
+     * Apply an edit to an existing issue: title, description,
+     * category (project path, creating missing nodes), milestone,
+     * status and work dates. Keeps the card's column in sync when the
+     * status changes by appending it to the bottom of the new column.
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private function issueUpdate(string $method, array $body): array
+    {
+        if ($method !== 'POST') {
+            throw new BadRequestException('issue-update requires POST');
+        }
+        $this->requireUser();
+
+        $id = $this->readId($body);
+        $existing = $this->issues->find($id);
+        if ($existing === null) {
+            throw new BadRequestException('unknown issue');
+        }
+
+        $title       = isset($body['title']) && is_string($body['title']) ? trim($body['title']) : '';
+        $description = isset($body['description']) && is_string($body['description']) ? trim($body['description']) : '';
+        $category    = isset($body['category']) && is_string($body['category']) ? trim($body['category']) : '';
+        $milestone   = isset($body['milestone']) && is_string($body['milestone']) ? trim($body['milestone']) : '';
+        $status      = isset($body['status']) && is_string($body['status']) ? $body['status'] : (string) $existing['status'];
+        $workStarted = isset($body['workStarted']) && is_string($body['workStarted']) ? trim($body['workStarted']) : '';
+        $workDone    = isset($body['workCompleted']) && is_string($body['workCompleted']) ? trim($body['workCompleted']) : '';
+
+        if ($title === '') {
+            throw new BadRequestException('title is required');
+        }
+        if (!in_array($status, Issues::STATUSES, true)) {
+            throw new BadRequestException("unknown status: {$status}");
+        }
+        if ($category === '') {
+            $category = 'Uncategorised';
+        }
+
+        [$projectId, $path] = $this->resolveProjectIdByPath($category);
+        $milestoneId = null;
+        if ($milestone !== '') {
+            $milestoneId = $this->resolveMilestoneIdByName($projectId, $milestone);
+        }
+
+        // Update the main fields first, then re-home the project_id
+        // separately because Issues::update() does not touch that
+        // column (category edits are a detail-view-only affordance).
+        $this->issues->update(
+            $id,
+            $title,
+            $milestoneId,
+            $status,
+            $workStarted !== '' ? $workStarted : null,
+            $workDone !== '' ? $workDone : null,
+            $description !== '' ? $description : null
+        );
+
+        if ((int) $existing['project_id'] !== $projectId) {
+            $stmt = $this->db->pdo()->prepare(
+                'UPDATE issues SET project_id = :project_id, updated_at = :updated_at WHERE id = :id'
+            );
+            $stmt->execute([
+                'project_id' => $projectId,
+                'updated_at' => gmdate('c'),
+                'id'         => $id,
+            ]);
+        }
+
+        // If status changed, append the card to the bottom of the new
+        // column so the kanban ordering stays sensible.
+        if ((string) $existing['status'] !== $status) {
+            $position = $this->nextPositionInStatus($status);
+            $this->issues->setStatus($id, $status, $position);
+        }
+
+        return [
+            'ok'    => true,
+            'issue' => [
+                'id'            => $id,
+                'title'         => $title,
+                'description'   => $description,
+                'status'        => $status,
+                'category'      => implode(self::CATEGORY_PATH_SEPARATOR, $path),
+                'categoryPath'  => $path,
+                'milestone'     => $milestone !== '' ? $milestone : null,
+                'workStarted'   => $workStarted !== '' ? $workStarted : null,
+                'workCompleted' => $workDone !== '' ? $workDone : null,
+            ],
+        ];
+    }
+
+    /**
+     * Record a time entry against an issue. Refreshes the aggregate
+     * cache so the kanban board's per-card "time spent" stays in sync.
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private function issueTimeAdd(string $method, array $body): array
+    {
+        if ($method !== 'POST') {
+            throw new BadRequestException('issue-time-add requires POST');
+        }
+        $this->requireUser();
+
+        $id = $this->readId($body);
+        $issue = $this->issues->find($id);
+        if ($issue === null) {
+            throw new BadRequestException('unknown issue');
+        }
+
+        $spentOn  = isset($body['spentOn'])  && is_string($body['spentOn'])  ? trim($body['spentOn'])  : '';
+        $category = isset($body['category']) && is_string($body['category']) ? trim($body['category']) : '';
+        $note     = isset($body['note'])     && is_string($body['note'])     ? trim($body['note'])     : '';
+        $hours    = isset($body['hours']) ? (float) $body['hours'] : 0.0;
+
+        if ($spentOn === '') {
+            $spentOn = gmdate('Y-m-d');
+        }
+        if ($hours <= 0) {
+            throw new BadRequestException('hours must be greater than zero');
+        }
+
+        $entryId = $this->timeEntries->create(
+            $id,
+            $spentOn,
+            $hours,
+            $category,
+            $note !== '' ? $note : null
+        );
+
+        $this->timeAggregates->refreshIssue($id);
+        $this->timeAggregates->refreshProject((int) $issue['project_id']);
+        if ($issue['milestone_id'] !== null) {
+            $this->timeAggregates->refreshMilestone((int) $issue['milestone_id']);
+        }
+
+        $agg = $this->timeAggregates->get(
+            TimeAggregates::SCOPE_ISSUE,
+            $id,
+            TimeAggregates::PERIOD_TOTAL,
+            '',
+            TimeAggregates::CATEGORY_ALL
+        );
+
+        return [
+            'ok'    => true,
+            'entry' => [
+                'id'       => $entryId,
+                'spentOn'  => $spentOn,
+                'hours'    => $hours,
+                'category' => $category,
+                'note'     => $note,
+            ],
+            'timeSpent' => $agg !== null ? (float) $agg['hours'] : 0.0,
+        ];
+    }
+
+    /**
+     * Append a comment to an issue. Attribution comes from the
+     * signed-in user - callers cannot forge the author.
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private function issueCommentAdd(string $method, array $body): array
+    {
+        if ($method !== 'POST') {
+            throw new BadRequestException('issue-comment-add requires POST');
+        }
+        $author = $this->requireUser();
+
+        $id = $this->readId($body);
+        if ($this->issues->find($id) === null) {
+            throw new BadRequestException('unknown issue');
+        }
+
+        $text = isset($body['body']) && is_string($body['body']) ? trim($body['body']) : '';
+        if ($text === '') {
+            throw new BadRequestException('body is required');
+        }
+
+        $commentId = $this->comments->create($id, $author, $text);
+
+        return [
+            'ok'      => true,
+            'comment' => [
+                'id'        => $commentId,
+                'author'    => $author,
+                'body'      => $text,
+                'createdAt' => gmdate('c'),
+            ],
+        ];
+    }
+
+    /**
+     * Extract a positive integer `id` from a request body, accepting
+     * either the native int or a digit-only string.
+     *
+     * @param array<string, mixed> $body
+     */
+    private function readId(array $body): int
+    {
+        $raw = $body['id'] ?? null;
+        if (is_int($raw) && $raw > 0) {
+            return $raw;
+        }
+        if (is_string($raw) && ctype_digit($raw) && $raw !== '0') {
+            return (int) $raw;
+        }
+        throw new BadRequestException('id is required');
     }
 
     /**

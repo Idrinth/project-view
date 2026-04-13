@@ -286,6 +286,21 @@ final class Database
             )",
             "CREATE INDEX IF NOT EXISTS idx_time_aggregates_scope ON time_aggregates(scope, scope_id)",
             "CREATE INDEX IF NOT EXISTS idx_time_aggregates_period ON time_aggregates(period_length, period_start)",
+
+            // Comments on issues. Rendered on the task detail view
+            // alongside the edit form and the time entries. `author`
+            // stores the signed-in username at the time the comment
+            // was posted so deleting a user row later does not erase
+            // attribution.
+            "CREATE TABLE IF NOT EXISTS comments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                issue_id INTEGER NOT NULL,
+                author TEXT NOT NULL,
+                body TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (issue_id) REFERENCES issues(id) ON DELETE CASCADE
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_comments_issue ON comments(issue_id)",
         ];
     }
 }

@@ -280,6 +280,10 @@ a:hover {
     padding: 0.75rem;
     margin-bottom: 0.75rem;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    cursor: pointer;
+}
+
+.kanban-card[draggable="true"] {
     cursor: grab;
 }
 
@@ -428,6 +432,207 @@ a:hover {
 .kanban-category .kanban-cat-leaf {
     color: #52606d;
     font-weight: 600;
+}
+
+/* Task detail modal */
+.detail-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(31, 41, 51, 0.55);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 2rem 1rem;
+    overflow-y: auto;
+    z-index: 20;
+}
+
+.detail-overlay[hidden] {
+    display: none;
+}
+
+.detail-modal {
+    background: #fff;
+    border-radius: 8px;
+    width: 100%;
+    max-width: 720px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+    padding: 1.5rem;
+    position: relative;
+}
+
+.detail-close {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.75rem;
+    background: transparent;
+    border: none;
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+    color: #52606d;
+}
+
+.detail-close:hover {
+    color: #1f2933;
+}
+
+.detail-body h3 {
+    margin: 0 0 1rem;
+    font-size: 1.1rem;
+    color: #1f2933;
+}
+
+.detail-section {
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid #e4e7eb;
+}
+
+.detail-section:first-child {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+}
+
+.detail-section h4 {
+    margin: 0 0 0.75rem;
+    font-size: 0.95rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #52606d;
+}
+
+.detail-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+.detail-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.85rem;
+    color: #52606d;
+}
+
+.detail-field-full {
+    grid-column: 1 / -1;
+}
+
+.detail-field input,
+.detail-field select,
+.detail-field textarea {
+    font: inherit;
+    padding: 0.4rem 0.5rem;
+    border: 1px solid #cbd2d9;
+    border-radius: 4px;
+    background: #fff;
+    color: #1f2933;
+}
+
+.detail-field textarea {
+    resize: vertical;
+    min-height: 5rem;
+}
+
+.detail-field input:focus,
+.detail-field select:focus,
+.detail-field textarea:focus {
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+
+.detail-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.detail-button {
+    font: inherit;
+    background: #2563eb;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 0.45rem 0.9rem;
+    cursor: pointer;
+}
+
+.detail-button:hover {
+    background: #1d4ed8;
+}
+
+.detail-button[disabled] {
+    opacity: 0.6;
+    cursor: progress;
+}
+
+.detail-status {
+    margin: 0;
+    font-size: 0.85rem;
+    color: #52606d;
+}
+
+.detail-error {
+    margin: 0;
+    color: #8a2a2a;
+    font-size: 0.85rem;
+}
+
+.detail-entries,
+.detail-comments {
+    list-style: none;
+    margin: 0 0 0.75rem;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.detail-entry,
+.detail-comment {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #e4e7eb;
+    border-radius: 6px;
+    background: #f5f7fa;
+    font-size: 0.9rem;
+}
+
+.detail-entry-meta,
+.detail-comment-meta {
+    font-size: 0.75rem;
+    color: #7b8794;
+    margin-bottom: 0.2rem;
+}
+
+.detail-comment-body {
+    margin: 0;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.detail-entry-note {
+    margin: 0.2rem 0 0;
+    color: #52606d;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.detail-empty {
+    margin: 0 0 0.75rem;
+    font-size: 0.85rem;
+    color: #9aa5b1;
+    font-style: italic;
+}
+
+@media (max-width: 540px) {
+    .detail-form {
+        grid-template-columns: 1fr;
+    }
 }
 
 /* Releases */
