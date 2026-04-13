@@ -18,6 +18,8 @@ line (via cron or manually). Nothing in here is reachable over HTTP.
 
 - `bin/build.php` - reads `resources/` and writes a minified copy to
   `public/`. Run with `php bin/build.php`.
+- `bin/migrate.php` - creates every table and index defined by the
+  database layer if missing. Run with `php bin/migrate.php`.
 
 ### `public/`
 The web server's document root. Only built assets live here; there must be
@@ -49,10 +51,14 @@ to that API via `fetch('index.php?endpoint=...')`.
 
 ### `config/`
 Server-side configuration. Not reachable over HTTP and not copied into
-`public/` by the build. Currently holds `config/auth.php`, which lists
-the accounts allowed to sign in (username => bcrypt hash) and the
-secret used to sign session JWTs. Replace the JWT secret and user list
-before deploying.
+`public/` by the build. Holds:
+
+- `config/auth.php` - accounts allowed to sign in (username => bcrypt
+  hash) and the secret used to sign session JWTs. Replace the JWT
+  secret and user list before deploying.
+- `config/database.php` - PDO DSN, credentials and options for the
+  database layer. Defaults to a SQLite file (`config/data.sqlite`)
+  that `bin/migrate.php` creates and the `.gitignore` excludes.
 
 ## Authentication
 
@@ -71,6 +77,42 @@ validated by `src/Jwt.php`; `src/Auth.php` owns the cookie lifecycle.
 `resources/html/login.html` is the form that calls the `login`
 endpoint, and every page's nav includes a `[data-user-menu]` slot that
 `main.js` fills based on `me`.
+
+## Database
+
+The API is backed by a PDO datastore. Connection settings live in
+`config/database.php`; the default DSN points at a SQLite file
+(`config/data.sqlite`) that is created on first migration and kept
+out of version control. Apply the schema with:
+
+```
+php bin/migrate.php
+```
+
+`src/Database.php` owns the connection and the schema definition
+(CREATE TABLE statements). Each table has a small repository class
+alongside it in `src/`:
+
+- `projects` (`src/Projects.php`) - projects aka categories: the
+  actual things being built or managed. Milestones and issues hang
+  off a project.
+- `milestones` (`src/Milestones.php`) - named version markers per
+  project. These are what the releases page surfaces; the two names
+  refer to the same rows.
+- `issues` (`src/Issues.php`) - tasks aka the cards on the kanban
+  board. Reference a project and optionally a milestone; `status` is
+  one of `todo` / `in-progress` / `done` / `discarded`.
+- `time_entries` (`src/TimeEntries.php`) - raw time tracking rows:
+  hours spent on an issue on a given date, optionally tagged with a
+  work category (e.g. Development, Testing, Research).
+- `time_aggregates` (`src/TimeAggregates.php`) - derived totals used
+  by the index overview and the per-card "time spent" on the kanban
+  board. Refreshed from `time_entries` with
+  `refreshIssue()` / `refreshProject()` / `refreshMilestone()`.
+
+The API (`src/Api.php`) currently still returns example data and
+does not read from the database yet; wiring the endpoints up to the
+repositories is a separate task.
 
 ## Current pages
 
