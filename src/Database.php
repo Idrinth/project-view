@@ -98,6 +98,18 @@ final class Database
     public static function schema(): array
     {
         return [
+            // users — accounts allowed to sign in. password_hash is
+            // produced with PHP's password_hash() (bcrypt / argon2)
+            // and verified with password_verify(). Managed from the
+            // CLI with bin/users.php.
+            "CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )",
+
             // projects (aka "categories" in the UI) — the actual
             // things being built or managed. Milestones and issues
             // hang off a project.
