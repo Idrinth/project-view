@@ -14,9 +14,6 @@ declare(strict_types=1);
 
 require __DIR__ . '/../src/Api.php';
 
-header('Content-Type: application/json; charset=utf-8');
-header('Cache-Control: no-store');
-
 // Endpoint name comes from PATH_INFO (e.g. /login -> "login"). Fall
 // back to parsing REQUEST_URI when PATH_INFO is absent (some server
 // configurations strip it), and finally to ?endpoint=... for callers
@@ -52,17 +49,62 @@ $method = isset($_SERVER['REQUEST_METHOD']) && is_string($_SERVER['REQUEST_METHO
     ? strtoupper($_SERVER['REQUEST_METHOD'])
     : 'GET';
 
+// Comment-attachment downloads are binary, not JSON, so they bypass
+// the usual handle() envelope and stream the stored file directly.
+// The endpoint is public (matching the "output visible for everyone"
+// half of the attachment policy); authorisation checks are the sole
+// responsibility of the upload/delete paths.
+if ($endpoint === 'comment-attachment' && $method === 'GET') {
+    $id = isset($_GET['id']) && is_string($_GET['id']) && ctype_digit($_GET['id'])
+        ? (int) $_GET['id']
+        : 0;
+    if ($id <= 0) {
+        http_response_code(400);
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['error' => 'id is required']);
+        return;
+    }
+    try {
+        $api = new \ProjectView\Api();
+        $api->streamCommentAttachment($id);
+    } catch (\Throwable $e) {
+        http_response_code(500);
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['error' => 'internal server error']);
+    }
+    return;
+}
+
+header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store');
+
 $body = [];
 if ($method === 'POST' || $method === 'PUT' || $method === 'PATCH') {
-    $raw = file_get_contents('php://input');
-    if (is_string($raw) && $raw !== '') {
-        $decoded = json_decode($raw, true);
-        if (is_array($decoded)) {
-            $body = $decoded;
-        }
-    }
-    if ($body === [] && !empty($_POST)) {
+    $contentType = isset($_SERVER['CONTENT_TYPE']) && is_string($_SERVER['CONTENT_TYPE'])
+        ? strtolower($_SERVER['CONTENT_TYPE'])
+        : '';
+    $isMultipart = strpos($contentType, 'multipart/form-data') === 0;
+
+    if ($isMultipart) {
+        // multipart uploads: PHP already parsed $_POST and $_FILES.
+        // Carry the uploads through to the Api under a reserved `_files`
+        // key so endpoints that accept attachments (issue-comment-add)
+        // can pick them up without touching $_FILES directly.
         $body = $_POST;
+        if (!empty($_FILES)) {
+            $body['_files'] = $_FILES;
+        }
+    } else {
+        $raw = file_get_contents('php://input');
+        if (is_string($raw) && $raw !== '') {
+            $decoded = json_decode($raw, true);
+            if (is_array($decoded)) {
+                $body = $decoded;
+            }
+        }
+        if ($body === [] && !empty($_POST)) {
+            $body = $_POST;
+        }
     }
 }
 

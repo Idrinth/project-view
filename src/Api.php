@@ -22,6 +22,7 @@ require_once __DIR__ . '/IssueLinks.php';
 require_once __DIR__ . '/TimeEntries.php';
 require_once __DIR__ . '/TimeAggregates.php';
 require_once __DIR__ . '/Comments.php';
+require_once __DIR__ . '/CommentAttachments.php';
 require_once __DIR__ . '/Users.php';
 
 final class Api
@@ -36,6 +37,7 @@ final class Api
     private TimeEntries $timeEntries;
     private TimeAggregates $timeAggregates;
     private Comments $comments;
+    private CommentAttachments $commentAttachments;
     private Users $users;
 
     public function __construct(?Auth $auth = null, ?Database $db = null)
@@ -50,6 +52,7 @@ final class Api
         $this->timeEntries = new TimeEntries($this->db);
         $this->timeAggregates = new TimeAggregates($this->db);
         $this->comments = new Comments($this->db);
+        $this->commentAttachments = new CommentAttachments($this->db);
         $this->users = new Users($this->db);
     }
 
@@ -86,6 +89,8 @@ final class Api
                 return $this->issueTimeAdd($method, $body);
             case 'issue-comment-add':
                 return $this->issueCommentAdd($method, $body);
+            case 'comment-attachment-remove':
+                return $this->commentAttachmentRemove($method, $body);
             case 'issue-link-add':
                 return $this->issueLinkAdd($method, $body);
             case 'issue-link-remove':
@@ -796,13 +801,16 @@ final class Api
             ];
         }
 
+        $attachmentsByComment = $this->commentAttachments->forIssue($id);
         $comments = [];
         foreach ($this->comments->forIssue($id) as $row) {
+            $commentId = (int) $row['id'];
             $comments[] = [
-                'id'        => (int) $row['id'],
-                'author'    => (string) $row['author'],
-                'body'      => (string) $row['body'],
-                'createdAt' => (string) $row['created_at'],
+                'id'          => $commentId,
+                'author'      => (string) $row['author'],
+                'body'        => (string) $row['body'],
+                'createdAt'   => (string) $row['created_at'],
+                'attachments' => self::formatAttachments($attachmentsByComment[$commentId] ?? []),
             ];
         }
 
@@ -1063,6 +1071,14 @@ final class Api
      * Append a comment to an issue. Attribution comes from the
      * signed-in user - callers cannot forge the author.
      *
+     * Optionally accepts media attachments (images, videos, audio
+     * clips) when the request was sent as multipart/form-data. The
+     * uploaded files are surfaced to this method via a synthetic
+     * `_files` key on $body, populated by the front controller from
+     * $_FILES, so the method signature matches every other endpoint.
+     * A comment with attachments may have an empty body; a comment
+     * with neither body nor attachments is still rejected.
+     *
      * @param array<string, mixed> $body
      * @return array<string, mixed>
      */
@@ -1081,21 +1097,286 @@ final class Api
         $this->requireEditAccess((int) $issue['project_id']);
 
         $text = isset($body['body']) && is_string($body['body']) ? trim($body['body']) : '';
-        if ($text === '') {
-            throw new BadRequestException('body is required');
+        $uploads = self::extractUploadList($body);
+
+        if ($text === '' && $uploads === []) {
+            throw new BadRequestException('body or attachment is required');
+        }
+
+        // Validate every upload up front so a bad file rejects the
+        // whole request before we touch the database. Keeps the
+        // state transition atomic: either the comment and every
+        // attachment land, or nothing does.
+        foreach ($uploads as $upload) {
+            self::validateUpload($upload);
         }
 
         $commentId = $this->comments->create($id, $author, $text);
 
+        $stored = [];
+        try {
+            foreach ($uploads as $upload) {
+                $attachmentId = $this->commentAttachments->create(
+                    $commentId,
+                    (string) $upload['tmp_name'],
+                    (string) $upload['name'],
+                    (string) $upload['type'],
+                    (int) $upload['size']
+                );
+                $stored[] = $attachmentId;
+            }
+        } catch (\Throwable $e) {
+            // Roll back on a partial failure so we never leave a
+            // comment with only some of its files attached.
+            foreach ($stored as $attachmentId) {
+                $this->commentAttachments->delete($attachmentId);
+            }
+            $this->comments->delete($commentId);
+            if ($e instanceof \InvalidArgumentException) {
+                throw new BadRequestException($e->getMessage());
+            }
+            throw $e;
+        }
+
+        $rows = $this->commentAttachments->forComment($commentId);
+
         return [
             'ok'      => true,
             'comment' => [
-                'id'        => $commentId,
-                'author'    => $author,
-                'body'      => $text,
-                'createdAt' => gmdate('c'),
+                'id'          => $commentId,
+                'author'      => $author,
+                'body'        => $text,
+                'createdAt'   => gmdate('c'),
+                'attachments' => self::formatAttachments($rows),
             ],
         ];
+    }
+
+    /**
+     * Remove a single attachment from a comment. Gated by the same
+     * per-project edit access check as the rest of the write paths,
+     * resolved via the owning comment's issue so a grant on the
+     * project (or one of its ancestors) lets the caller prune their
+     * own uploads.
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private function commentAttachmentRemove(string $method, array $body): array
+    {
+        if ($method !== 'POST') {
+            throw new BadRequestException('comment-attachment-remove requires POST');
+        }
+        $this->requireUser();
+
+        $id = isset($body['id']) && (is_int($body['id']) || (is_string($body['id']) && ctype_digit($body['id'])))
+            ? (int) $body['id']
+            : 0;
+        if ($id <= 0) {
+            throw new BadRequestException('id is required');
+        }
+        $attachment = $this->commentAttachments->find($id);
+        if ($attachment === null) {
+            throw new BadRequestException('unknown attachment');
+        }
+
+        // Walk attachment -> comment -> issue to find the project the
+        // edit-access check runs against. A missing comment or issue
+        // is treated as "unknown" rather than a server error: the
+        // cascade delete on comments/issues means those rows should
+        // always have taken this attachment with them anyway.
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT i.project_id
+               FROM comments c
+               JOIN issues i ON i.id = c.issue_id
+              WHERE c.id = :comment_id'
+        );
+        $stmt->execute(['comment_id' => (int) $attachment['comment_id']]);
+        $row = $stmt->fetch();
+        if ($row === false) {
+            throw new BadRequestException('unknown attachment');
+        }
+        $this->requireEditAccess((int) $row['project_id']);
+
+        $this->commentAttachments->delete($id);
+        return ['ok' => true];
+    }
+
+    /**
+     * Stream an attachment's binary content to the client. Intended
+     * to be called directly by the front controller (bypassing the
+     * usual JSON response path) because the response is the file
+     * itself, not a JSON envelope. Output is intentionally cacheable
+     * so repeat views of a comment reuse the cached bytes.
+     *
+     * The endpoint is public: non-authenticated visitors can view
+     * every attachment, matching the "upload restricted, output
+     * visible to everyone" policy for comments as a whole.
+     */
+    public function streamCommentAttachment(int $id): void
+    {
+        $row = $this->commentAttachments->find($id);
+        if ($row === null) {
+            http_response_code(404);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['error' => 'unknown attachment']);
+            return;
+        }
+        $path = $this->commentAttachments->pathFor($row);
+        if (!is_file($path)) {
+            http_response_code(404);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['error' => 'file missing']);
+            return;
+        }
+
+        $mime = (string) $row['mime_type'];
+        $size = (int) $row['size'];
+        $original = (string) $row['original_name'];
+        // Strip anything that would break the Content-Disposition
+        // quoting; originals come from user input.
+        $safeOriginal = preg_replace('/[\r\n"\\\\]/', '_', $original) ?? 'attachment';
+
+        header('Content-Type: ' . $mime);
+        header('Content-Length: ' . $size);
+        header('Content-Disposition: inline; filename="' . $safeOriginal . '"');
+        header('Cache-Control: public, max-age=31536000, immutable');
+        header('X-Content-Type-Options: nosniff');
+        readfile($path);
+    }
+
+    /**
+     * Shape attachment DB rows for the JSON response. Only exposes
+     * fields the frontend needs; `stored_name` is deliberately kept
+     * internal so URLs cannot be constructed by guessing at it.
+     *
+     * @param list<array<string, mixed>> $rows
+     * @return list<array<string, mixed>>
+     */
+    private static function formatAttachments(array $rows): array
+    {
+        $out = [];
+        foreach ($rows as $row) {
+            $out[] = [
+                'id'           => (int) $row['id'],
+                'kind'         => (string) $row['kind'],
+                'mimeType'     => (string) $row['mime_type'],
+                'originalName' => (string) $row['original_name'],
+                'size'         => (int) $row['size'],
+                'url'          => 'comment-attachment?id=' . (int) $row['id'],
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Normalise PHP's $_FILES-style nested arrays into a flat list of
+     * `{name, type, tmp_name, error, size}` entries. Accepts both the
+     * single-file layout and the `name[]` multi-file layout. Returns
+     * the empty list when no files are present.
+     *
+     * @param array<string, mixed> $body
+     * @return list<array<string, mixed>>
+     */
+    private static function extractUploadList(array $body): array
+    {
+        $raw = $body['_files'] ?? null;
+        if (!is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            // Multi-file field: each sub-key is an array indexed by
+            // the upload slot (e.g. $_FILES['files']['name'][0]).
+            if (isset($entry['name']) && is_array($entry['name'])) {
+                $count = count($entry['name']);
+                for ($i = 0; $i < $count; $i++) {
+                    $out[] = [
+                        'name'     => (string) ($entry['name'][$i] ?? ''),
+                        'type'     => (string) ($entry['type'][$i] ?? ''),
+                        'tmp_name' => (string) ($entry['tmp_name'][$i] ?? ''),
+                        'error'    => (int) ($entry['error'][$i] ?? UPLOAD_ERR_NO_FILE),
+                        'size'     => (int) ($entry['size'][$i] ?? 0),
+                    ];
+                }
+                continue;
+            }
+            // Single-file field: entry is already flat.
+            $out[] = [
+                'name'     => (string) ($entry['name'] ?? ''),
+                'type'     => (string) ($entry['type'] ?? ''),
+                'tmp_name' => (string) ($entry['tmp_name'] ?? ''),
+                'error'    => (int) ($entry['error'] ?? UPLOAD_ERR_NO_FILE),
+                'size'     => (int) ($entry['size'] ?? 0),
+            ];
+        }
+        // Drop empty slots (the browser submits an empty file input
+        // with error = UPLOAD_ERR_NO_FILE even when the user chose
+        // nothing; treating that as a hard error would be noisy).
+        return array_values(array_filter($out, static function ($upload) {
+            return ($upload['error'] !== UPLOAD_ERR_NO_FILE) || $upload['tmp_name'] !== '';
+        }));
+    }
+
+    /**
+     * Reject an upload slot that PHP flagged as failed, that carries
+     * an unsupported mime type, or that exceeds the hard size cap
+     * (25 MiB). Uses BadRequestException so the client sees a 400
+     * rather than a 500.
+     *
+     * @param array<string, mixed> $upload
+     */
+    private static function validateUpload(array $upload): void
+    {
+        $error = (int) ($upload['error'] ?? UPLOAD_ERR_NO_FILE);
+        if ($error !== UPLOAD_ERR_OK) {
+            throw new BadRequestException(self::uploadErrorMessage($error));
+        }
+        $tmp = (string) ($upload['tmp_name'] ?? '');
+        if ($tmp === '' || !is_file($tmp)) {
+            throw new BadRequestException('upload is missing a file');
+        }
+        $size = (int) ($upload['size'] ?? 0);
+        if ($size <= 0) {
+            throw new BadRequestException('uploaded file is empty');
+        }
+        // Hard cap enforced even when PHP's own ini limits are set
+        // higher, so a single comment can never eat the disk.
+        $maxBytes = 25 * 1024 * 1024;
+        if ($size > $maxBytes) {
+            throw new BadRequestException('uploaded file is too large (max 25 MiB)');
+        }
+        $mime = (string) ($upload['type'] ?? '');
+        if (CommentAttachments::kindForMime($mime) === null) {
+            throw new BadRequestException('unsupported media type: ' . ($mime !== '' ? $mime : 'unknown'));
+        }
+    }
+
+    /**
+     * Human-readable message for a PHP upload error code. Mostly
+     * useful to distinguish "file too big" from "no tmp dir" in the
+     * UI without exposing server internals.
+     */
+    private static function uploadErrorMessage(int $error): string
+    {
+        switch ($error) {
+            case UPLOAD_ERR_INI_SIZE:
+            case UPLOAD_ERR_FORM_SIZE:
+                return 'uploaded file is too large';
+            case UPLOAD_ERR_PARTIAL:
+                return 'upload was interrupted';
+            case UPLOAD_ERR_NO_FILE:
+                return 'no file uploaded';
+            case UPLOAD_ERR_NO_TMP_DIR:
+            case UPLOAD_ERR_CANT_WRITE:
+            case UPLOAD_ERR_EXTENSION:
+                return 'server could not store the upload';
+            default:
+                return 'upload failed';
+        }
     }
 
     /**
