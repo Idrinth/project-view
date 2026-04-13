@@ -47,7 +47,11 @@ where models, controllers and service classes live. It is not part of
 the document root; the API is exposed via the thin front controller in
 `resources/php/index.php`, which is built into `public/index.php` and
 dispatches to `ProjectView\Api` (in `src/Api.php`). The frontend talks
-to that API via `fetch('index.php?endpoint=...')`.
+to that API via `fetch('<endpoint>')`, e.g. `fetch('kanban')`. An
+`.htaccess` rewrite (source at `resources/php/.htaccess`) maps those
+path-based URLs onto `index.php` as `PATH_INFO` so the query string
+stays empty - some mod_security rules flag `?endpoint=...` requests,
+hence the path-based shape.
 
 ### `config/`
 Server-side configuration. Not reachable over HTTP and not copied into
@@ -65,11 +69,11 @@ Server-side configuration. Not reachable over HTTP and not copied into
 The API supports a JWT-in-cookie login flow, intended as a gate for
 future write operations from the frontend.
 
-- `POST index.php?endpoint=login` with `{"username": "...", "password": "..."}`
+- `POST /login` with `{"username": "...", "password": "..."}`
   verifies credentials against `config/auth.php` and, on success, sets
   an HttpOnly `pv_auth` cookie carrying an HS256-signed JWT.
-- `POST index.php?endpoint=logout` clears the cookie.
-- `GET  index.php?endpoint=me` returns the current user or 401.
+- `POST /logout` clears the cookie.
+- `GET  /me` returns the current user or 401.
 
 Only accounts explicitly listed in `config/auth.php` can sign in;
 passwords are compared with `password_verify()`. JWTs are produced and
@@ -130,13 +134,12 @@ matching JSON payload from the PHP API on load and renders it. The API
 currently returns example data only.
 
 - `index.html` - overview / landing page with links to the three views
-- `kanban.html` - Todo / In Progress / Done / Discarded board
-  (`endpoint=kanban`)
+- `kanban.html` - Todo / In Progress / Done / Discarded board (`/kanban`)
 - `releases.html` - grid of tracked projects with their historical
-  version releases (`endpoint=releases`)
+  version releases (`/releases`)
 - `time.html` - weekly breakdown of tracked hours per issue and
-  category (`endpoint=time`)
-- `login.html` - sign-in form that calls `endpoint=login`
+  category (`/time`)
+- `login.html` - sign-in form that calls `/login`
 
 ## Build
 
