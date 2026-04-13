@@ -1436,6 +1436,10 @@
 
     function notifyCardMoved(cardEl, originParent) {
         var newParent = cardEl.parentNode;
+        if (originParent && originParent !== newParent) {
+            refreshKanbanColumnCount(originParent);
+        }
+        refreshKanbanColumnCount(newParent);
         var idAttr = cardEl.getAttribute('data-card-id');
         if (!idAttr) {
             // Card has no persistent id yet (e.g. still saving); skip.
@@ -1483,6 +1487,22 @@
             completed.appendChild(document.createTextNode('Work completed: '));
             completed.appendChild(dateOrDash(workCompleted));
         }
+    }
+
+    // Update the "(N)" badge in a kanban column's heading to match the
+    // number of cards currently in its card list. Called after any
+    // DOM-level mutation that doesn't go through a full re-render
+    // (drag-and-drop moves, inline card additions).
+    function refreshKanbanColumnCount(cardListEl) {
+        if (!cardListEl || !cardListEl.parentNode) {
+            return;
+        }
+        var countEl = cardListEl.parentNode.querySelector('[data-kanban-count]');
+        if (!countEl) {
+            return;
+        }
+        var count = cardListEl.querySelectorAll('.kanban-card').length;
+        countEl.textContent = '(' + count + ')';
     }
 
     function findInsertBefore(cardListEl, y) {
@@ -1673,6 +1693,7 @@
                     };
                     var card = buildCardEl(cardData, true);
                     column.cardListEl.appendChild(card);
+                    refreshKanbanColumnCount(column.cardListEl);
                     addCategoryPathToDatalist(cardCategoryPath(cardData));
                     close();
                 })
@@ -1722,7 +1743,10 @@
                     classes += ' kanban-column-waiting';
                 }
                 var section = el('section', { className: classes });
-                section.appendChild(el('h3', { className: 'kanban-title', text: column.title }));
+                section.appendChild(el('h3', { className: 'kanban-title' }, [
+                    document.createTextNode(column.title + ' '),
+                    el('span', { className: 'kanban-count', 'data-kanban-count': '' })
+                ]));
 
                 var cardList = el('div', { className: 'kanban-cards' });
                 cardList.setAttribute('data-column-id', column.id);
@@ -1733,6 +1757,7 @@
                     makeDropTarget(cardList);
                 }
                 section.appendChild(cardList);
+                refreshKanbanColumnCount(cardList);
                 if (canEdit && modal) {
                     modal.registerColumn(column.id, column.title, cardList);
                     section.appendChild(buildAddCardButton(modal, column.id));

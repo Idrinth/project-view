@@ -417,6 +417,11 @@ a:hover {
     color: var(--color-waiting-text);
 }
 
+.kanban-count {
+    font-weight: normal;
+    opacity: 0.7;
+}
+
 .kanban-cards {
     flex: 1 1 auto;
     min-height: 4rem;
