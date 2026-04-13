@@ -452,7 +452,16 @@
     }
 
     function formatHours(value) {
-        return Number(value).toFixed(1);
+        var num = Number(value);
+        if (!isFinite(num)) {
+            return '0.0';
+        }
+        // Round to the hundredths so a 0.25h entry survives the trip
+        // without collapsing to 0.3. Drop a trailing hundredths zero so
+        // the common "X.Xh" shape (0.5h, 1.0h) is preserved for values
+        // that don't actually need two decimals.
+        var rounded = Math.round(num * 100) / 100;
+        return rounded.toFixed(2).replace(/(\.\d)0$/, '$1');
     }
 
     function dateOrDash(value) {
@@ -521,7 +530,7 @@
         return card.category || '';
     }
 
-    function buildCardEl(card, draggable) {
+    function buildCardChildren(card) {
         var path = Array.isArray(card.categoryPath) ? card.categoryPath : null;
         var categoryNode;
         if (path && path.length > 1) {
@@ -552,7 +561,7 @@
             ? el('p', { className: 'kanban-description', text: description })
             : el('p', { className: 'kanban-description kanban-description-empty', text: 'No description' });
 
-        var cardEl = el('article', { className: 'kanban-card' }, [
+        return [
             el('h4', { text: card.title }),
             descriptionNode,
             categoryNode,
@@ -565,7 +574,11 @@
                 className: 'kanban-meta kanban-time',
                 text: 'Time spent: ' + formatHours(card.timeSpent) + 'h'
             })
-        ]);
+        ];
+    }
+
+    function buildCardEl(card, draggable) {
+        var cardEl = el('article', { className: 'kanban-card' }, buildCardChildren(card));
         if (card.id != null) {
             cardEl.setAttribute('data-card-id', String(card.id));
         }
@@ -1120,14 +1133,12 @@
         }
         var parent = cardEl.parentNode;
         var currentStatus = parent.getAttribute('data-column-id') || '';
-        var targetParent = parent;
         if (issue.status && issue.status !== currentStatus) {
             var candidate = document.querySelector('[data-column-id="' + issue.status + '"]');
-            if (candidate) {
-                targetParent = candidate;
+            if (candidate && candidate !== parent) {
+                candidate.appendChild(cardEl);
             }
         }
-        var draggable = cardEl.getAttribute('draggable') === 'true';
         var card = {
             id: issue.id,
             title: issue.title,
@@ -1139,10 +1150,19 @@
             workCompleted: issue.workCompleted,
             timeSpent: issue.timeSpent != null ? issue.timeSpent : 0
         };
-        var replacement = buildCardEl(card, draggable);
-        targetParent.appendChild(replacement);
-        if (cardEl !== replacement) {
-            cardEl.parentNode.removeChild(cardEl);
+        // Rewrite the card's contents in place so the element identity
+        // is preserved. The detail modal caches this cardEl in the
+        // closures for the edit and time-log forms; if we swapped the
+        // whole element out, a subsequent time-log submit would write
+        // its "Time spent: Xh" update to the detached old node and
+        // never reach the real card on the board.
+        clear(cardEl);
+        var children = buildCardChildren(card);
+        for (var i = 0; i < children.length; i++) {
+            cardEl.appendChild(children[i]);
+        }
+        if (card.id != null) {
+            cardEl.setAttribute('data-card-id', String(card.id));
         }
     }
 
