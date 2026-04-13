@@ -26,6 +26,43 @@ if (!is_dir($public) && !mkdir($public, 0755, true) && !is_dir($public)) {
 }
 
 /**
+ * Compute a short content hash suitable for use as a cache-busting query
+ * parameter. Derived from the built (minified) contents, so any change
+ * to the served file produces a new value.
+ */
+function asset_hash(string $contents): string
+{
+    return substr(hash('sha256', $contents), 0, 10);
+}
+
+/**
+ * Rewrite <link href="..."> and <script src="..."> references to built
+ * CSS/JS assets so they include a ?v=<hash> cache-busting parameter.
+ * The lookup is keyed by the asset's basename, which matches how the
+ * flat public/ layout is referenced from the HTML templates.
+ *
+ * Runs on raw HTML before minify_html() stashes <script> blocks, so
+ * that the rewritten `src` attribute is preserved verbatim.
+ */
+function rewrite_asset_references(string $html, array $hashes): string
+{
+    $pattern = '#(<(?:link|script)\b[^>]*?\b(?:href|src)\s*=\s*")([^"]+\.(?:css|js))(")#i';
+    return preg_replace_callback(
+        $pattern,
+        static function (array $match) use ($hashes): string {
+            $url = $match[2];
+            $basename = basename($url);
+            if (!isset($hashes[$basename])) {
+                return $match[0];
+            }
+            $separator = strpos($url, '?') === false ? '?' : '&';
+            return $match[1] . $url . $separator . 'v=' . $hashes[$basename] . $match[3];
+        },
+        $html
+    ) ?? $html;
+}
+
+/**
  * Minify HTML by stripping comments and collapsing whitespace between tags.
  * Content inside <pre>, <textarea> and <script> blocks is preserved.
  */
@@ -116,47 +153,70 @@ function clear_directory(string $path): void
 echo "Cleaning {$public} ...\n";
 clear_directory($public);
 
-$processed = 0;
+// Collect every source file up front so we can process non-HTML assets
+// first (to compute their content hashes) and then rewrite the HTML in
+// a second pass with cache-busting ?v=<hash> parameters baked in.
+$files = [];
 $iterator = new RecursiveIteratorIterator(
     new RecursiveDirectoryIterator($resources, FilesystemIterator::SKIP_DOTS)
 );
-
 foreach ($iterator as $file) {
     if (!$file->isFile()) {
         continue;
     }
 
-    $relative  = substr($file->getPathname(), strlen($resources) + 1);
-    $extension = strtolower($file->getExtension());
-    $basename  = $file->getBasename();
-
+    $relative = substr($file->getPathname(), strlen($resources) + 1);
     // Flatten the top-level resources/{html,css,js,php} folders so that
     // public/ contains a flat, directly servable set of files.
     $relative = preg_replace('#^(html|css|js|php)[\\\\/]#', '', $relative) ?? $relative;
 
-    $target = $public . '/' . $relative;
+    $files[] = [
+        'source'    => $file->getPathname(),
+        'relative'  => $relative,
+        'basename'  => $file->getBasename(),
+        'extension' => strtolower($file->getExtension()),
+    ];
+}
+
+// Order so that assets referenced from HTML (CSS, JS) are built before
+// the HTML files that link to them. Everything that isn't HTML goes in
+// the first pass; HTML files go in the second pass.
+usort($files, static function (array $a, array $b): int {
+    $aIsHtml = in_array($a['extension'], ['html', 'htm'], true) ? 1 : 0;
+    $bIsHtml = in_array($b['extension'], ['html', 'htm'], true) ? 1 : 0;
+    return $aIsHtml <=> $bIsHtml;
+});
+
+$processed    = 0;
+$assetHashes  = [];
+
+foreach ($files as $entry) {
+    $target = $public . '/' . $entry['relative'];
     $dir    = dirname($target);
     if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
         fwrite(STDERR, "could not create directory: {$dir}\n");
         exit(1);
     }
 
-    $contents = file_get_contents($file->getPathname());
+    $contents = file_get_contents($entry['source']);
     if ($contents === false) {
-        fwrite(STDERR, "could not read {$file->getPathname()}\n");
+        fwrite(STDERR, "could not read {$entry['source']}\n");
         exit(1);
     }
 
-    switch ($extension) {
+    switch ($entry['extension']) {
         case 'html':
         case 'htm':
+            $contents = rewrite_asset_references($contents, $assetHashes);
             $contents = minify_html($contents);
             break;
         case 'css':
             $contents = minify_css($contents);
+            $assetHashes[basename($entry['relative'])] = asset_hash($contents);
             break;
         case 'js':
             $contents = minify_js($contents);
+            $assetHashes[basename($entry['relative'])] = asset_hash($contents);
             break;
     }
 
@@ -165,7 +225,7 @@ foreach ($iterator as $file) {
         exit(1);
     }
 
-    echo "  {$basename} -> public/{$relative}\n";
+    echo "  {$entry['basename']} -> public/{$entry['relative']}\n";
     $processed++;
 }
 
