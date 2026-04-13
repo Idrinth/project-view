@@ -652,12 +652,14 @@
     }
 
     function buildCardChildren(card) {
-        var path = Array.isArray(card.categoryPath) ? card.categoryPath : null;
+        var path = cardCategoryPath(card);
         var categoryNode;
-        if (path && path.length > 1) {
+        if (path.length > 0) {
             // Render a breadcrumb where each segment except the last
             // is de-emphasised, so the leaf project (the thing the
-            // card actually belongs to) stands out at a glance.
+            // card actually belongs to) stands out at a glance. This
+            // runs even for a single-segment path so the leaf is still
+            // highlighted when there is no parent category.
             var crumbs = [document.createTextNode('Category: ')];
             for (var i = 0; i < path.length; i++) {
                 var isLeaf = i === path.length - 1;
