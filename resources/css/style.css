@@ -1,4 +1,131 @@
 /* Project View base styles */
+
+/* Theme palette. The defaults here describe the light theme; the dark
+   theme is opted into either automatically (via prefers-color-scheme)
+   or explicitly (via data-theme on the <html> element). Keeping every
+   colour in a variable means the theme toggle only has to swap this
+   block rather than every rule below. */
+:root {
+    color-scheme: light;
+
+    --color-bg: #f5f7fa;
+    --color-surface: #fff;
+    --color-surface-sunken: #e4e7eb;
+    --color-surface-nested: #f5f7fa;
+
+    --color-text: #1f2933;
+    --color-text-muted: #52606d;
+    --color-text-subtle: #7b8794;
+    --color-text-faint: #9aa5b1;
+
+    --color-border: #e4e7eb;
+    --color-border-strong: #cbd2d9;
+
+    --color-accent: #2563eb;
+    --color-accent-hover: #1d4ed8;
+    --color-accent-ring: rgba(37, 99, 235, 0.2);
+    --color-accent-text: #fff;
+
+    --color-danger: #8a2a2a;
+
+    --color-discarded-bg: #f3d6d6;
+    --color-discarded-text: #8a2a2a;
+    --color-waiting-bg: #fdecc8;
+    --color-waiting-text: #8a5a00;
+
+    --color-header-bg: #1f2933;
+    --color-header-text: #fff;
+    --color-header-text-muted: #cbd2d9;
+    --color-header-border: #52606d;
+
+    --color-overlay: rgba(15, 23, 42, 0.55);
+    --color-overlay-alt: rgba(31, 41, 51, 0.55);
+    --color-shadow-card: rgba(0, 0, 0, 0.05);
+    --color-shadow-modal: rgba(0, 0, 0, 0.2);
+}
+
+/* Dark palette. Applied automatically when the user's OS is set to
+   dark mode AND they haven't picked "light" explicitly, and applied
+   unconditionally when they've picked "dark" explicitly. */
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        color-scheme: dark;
+
+        --color-bg: #0f1419;
+        --color-surface: #1a1f26;
+        --color-surface-sunken: #232a34;
+        --color-surface-nested: #131820;
+
+        --color-text: #e4e7eb;
+        --color-text-muted: #9aa5b1;
+        --color-text-subtle: #7b8794;
+        --color-text-faint: #52606d;
+
+        --color-border: #2d3540;
+        --color-border-strong: #4a5562;
+
+        --color-accent: #60a5fa;
+        --color-accent-hover: #93c5fd;
+        --color-accent-ring: rgba(96, 165, 250, 0.3);
+        --color-accent-text: #0f1419;
+
+        --color-danger: #f87171;
+
+        --color-discarded-bg: #3d1f1f;
+        --color-discarded-text: #fca5a5;
+        --color-waiting-bg: #3a2a10;
+        --color-waiting-text: #fbbf24;
+
+        --color-header-bg: #0a0e12;
+        --color-header-text: #f5f7fa;
+        --color-header-text-muted: #9aa5b1;
+        --color-header-border: #4a5562;
+
+        --color-overlay: rgba(0, 0, 0, 0.7);
+        --color-overlay-alt: rgba(0, 0, 0, 0.7);
+        --color-shadow-card: rgba(0, 0, 0, 0.3);
+        --color-shadow-modal: rgba(0, 0, 0, 0.5);
+    }
+}
+
+:root[data-theme="dark"] {
+    color-scheme: dark;
+
+    --color-bg: #0f1419;
+    --color-surface: #1a1f26;
+    --color-surface-sunken: #232a34;
+    --color-surface-nested: #131820;
+
+    --color-text: #e4e7eb;
+    --color-text-muted: #9aa5b1;
+    --color-text-subtle: #7b8794;
+    --color-text-faint: #52606d;
+
+    --color-border: #2d3540;
+    --color-border-strong: #4a5562;
+
+    --color-accent: #60a5fa;
+    --color-accent-hover: #93c5fd;
+    --color-accent-ring: rgba(96, 165, 250, 0.3);
+
+    --color-danger: #f87171;
+
+    --color-discarded-bg: #3d1f1f;
+    --color-discarded-text: #fca5a5;
+    --color-waiting-bg: #3a2a10;
+    --color-waiting-text: #fbbf24;
+
+    --color-header-bg: #0a0e12;
+    --color-header-text: #f5f7fa;
+    --color-header-text-muted: #9aa5b1;
+    --color-header-border: #4a5562;
+
+    --color-overlay: rgba(0, 0, 0, 0.7);
+    --color-overlay-alt: rgba(0, 0, 0, 0.7);
+    --color-shadow-card: rgba(0, 0, 0, 0.3);
+    --color-shadow-modal: rgba(0, 0, 0, 0.5);
+}
+
 * {
     box-sizing: border-box;
 }
@@ -6,13 +133,13 @@
 body {
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    color: #1f2933;
-    background: #f5f7fa;
+    color: var(--color-text);
+    background: var(--color-bg);
     line-height: 1.5;
 }
 
 a {
-    color: #2563eb;
+    color: var(--color-accent);
     text-decoration: none;
 }
 
@@ -21,8 +148,8 @@ a:hover {
 }
 
 .site-header {
-    background: #1f2933;
-    color: #fff;
+    background: var(--color-header-bg);
+    color: var(--color-header-text);
     padding: 1rem 2rem;
     display: flex;
     flex-wrap: wrap;
@@ -37,13 +164,13 @@ a:hover {
 }
 
 .main-nav a {
-    color: #cbd2d9;
+    color: var(--color-header-text-muted);
     margin-left: 1rem;
 }
 
 .main-nav a.active,
 .main-nav a:hover {
-    color: #fff;
+    color: var(--color-header-text);
     text-decoration: none;
 }
 
@@ -51,44 +178,51 @@ a:hover {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    color: #cbd2d9;
+    color: var(--color-header-text-muted);
     font-size: 0.9rem;
 }
 
 .user-menu-name {
-    color: #fff;
+    color: var(--color-header-text);
 }
 
 .user-menu-login {
-    color: #cbd2d9;
+    color: var(--color-header-text-muted);
 }
 
 .user-menu-login:hover {
-    color: #fff;
+    color: var(--color-header-text);
     text-decoration: none;
 }
 
-.user-menu-logout {
+.user-menu-logout,
+.theme-toggle {
     background: transparent;
-    border: 1px solid #52606d;
-    color: #cbd2d9;
+    border: 1px solid var(--color-header-border);
+    color: var(--color-header-text-muted);
     border-radius: 4px;
     padding: 0.25rem 0.6rem;
     font-size: 0.8rem;
     cursor: pointer;
 }
 
-.user-menu-logout:hover {
-    color: #fff;
-    border-color: #cbd2d9;
+.user-menu-logout:hover,
+.theme-toggle:hover {
+    color: var(--color-header-text);
+    border-color: var(--color-header-text-muted);
+}
+
+.theme-toggle {
+    font: inherit;
+    font-size: 0.8rem;
 }
 
 /* Login form */
 .login {
     max-width: 360px;
     margin: 0 auto;
-    background: #fff;
-    border: 1px solid #e4e7eb;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
     border-radius: 8px;
     padding: 1.5rem;
 }
@@ -109,28 +243,28 @@ a:hover {
     flex-direction: column;
     gap: 0.25rem;
     font-size: 0.9rem;
-    color: #52606d;
+    color: var(--color-text-muted);
 }
 
 .login-field input {
     font: inherit;
     padding: 0.5rem 0.6rem;
-    border: 1px solid #cbd2d9;
+    border: 1px solid var(--color-border-strong);
     border-radius: 4px;
-    background: #fff;
-    color: #1f2933;
+    background: var(--color-surface);
+    color: var(--color-text);
 }
 
 .login-field input:focus {
     outline: none;
-    border-color: #2563eb;
-    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 2px var(--color-accent-ring);
 }
 
 .login-button {
     font: inherit;
-    background: #2563eb;
-    color: #fff;
+    background: var(--color-accent);
+    color: var(--color-accent-text);
     border: none;
     border-radius: 4px;
     padding: 0.55rem 0.8rem;
@@ -138,12 +272,12 @@ a:hover {
 }
 
 .login-button:hover {
-    background: #1d4ed8;
+    background: var(--color-accent-hover);
 }
 
 .login-error {
     margin: 0;
-    color: #8a2a2a;
+    color: var(--color-danger);
     font-size: 0.85rem;
 }
 
@@ -162,7 +296,7 @@ a:hover {
 .site-footer {
     text-align: center;
     padding: 1.5rem;
-    color: #7b8794;
+    color: var(--color-text-subtle);
     font-size: 0.875rem;
 }
 
@@ -171,12 +305,12 @@ a:hover {
 }
 
 .footer-nav a {
-    color: #52606d;
+    color: var(--color-text-muted);
     margin: 0 0.5rem;
 }
 
 .muted {
-    color: #7b8794;
+    color: var(--color-text-subtle);
 }
 
 /* Overview cards */
@@ -190,14 +324,14 @@ a:hover {
 .card {
     display: block;
     padding: 1.25rem;
-    background: #fff;
-    border: 1px solid #e4e7eb;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
     border-radius: 8px;
     color: inherit;
 }
 
 .card:hover {
-    border-color: #2563eb;
+    border-color: var(--color-accent);
     text-decoration: none;
 }
 
@@ -213,7 +347,7 @@ a:hover {
     gap: 0.5rem;
     margin: 0 0 1rem;
     font-size: 0.9rem;
-    color: #52606d;
+    color: var(--color-text-muted);
 }
 
 .category-filter-label {
@@ -225,31 +359,31 @@ a:hover {
     min-width: 180px;
     padding: 0.4rem 0.6rem;
     font: inherit;
-    border: 1px solid #cbd2d9;
+    border: 1px solid var(--color-border-strong);
     border-radius: 4px;
-    background: #fff;
-    color: #1f2933;
+    background: var(--color-surface);
+    color: var(--color-text);
 }
 
 .category-filter input:focus {
     outline: none;
-    border-color: #2563eb;
-    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 2px var(--color-accent-ring);
 }
 
 .category-filter-clear {
     padding: 0.35rem 0.75rem;
     border-radius: 4px;
-    border: 1px solid #cbd2d9;
+    border: 1px solid var(--color-border-strong);
     background: transparent;
-    color: #52606d;
+    color: var(--color-text-muted);
     font: inherit;
     cursor: pointer;
 }
 
 .category-filter-clear:hover {
-    border-color: #52606d;
-    color: #1f2933;
+    border-color: var(--color-text-muted);
+    color: var(--color-text);
 }
 
 /* Kanban */
@@ -260,7 +394,7 @@ a:hover {
 }
 
 .kanban-column {
-    background: #e4e7eb;
+    background: var(--color-surface-sunken);
     border-radius: 8px;
     padding: 1rem;
     min-height: 200px;
@@ -269,11 +403,11 @@ a:hover {
 }
 
 .kanban-column-discarded {
-    background: #f3d6d6;
+    background: var(--color-discarded-bg);
 }
 
 .kanban-column-waiting {
-    background: #fdecc8;
+    background: var(--color-waiting-bg);
 }
 
 .kanban-title {
@@ -281,15 +415,15 @@ a:hover {
     font-size: 1rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #52606d;
+    color: var(--color-text-muted);
 }
 
 .kanban-column-discarded .kanban-title {
-    color: #8a2a2a;
+    color: var(--color-discarded-text);
 }
 
 .kanban-column-waiting .kanban-title {
-    color: #8a5a00;
+    color: var(--color-waiting-text);
 }
 
 .kanban-cards {
@@ -298,11 +432,11 @@ a:hover {
 }
 
 .kanban-card {
-    background: #fff;
+    background: var(--color-surface);
     border-radius: 6px;
     padding: 0.75rem;
     margin-bottom: 0.75rem;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    box-shadow: 0 1px 2px var(--color-shadow-card);
     cursor: pointer;
 }
 
@@ -334,32 +468,32 @@ a:hover {
     width: 100%;
     padding: 0.5rem;
     background: transparent;
-    border: 1px dashed #9aa5b1;
+    border: 1px dashed var(--color-text-faint);
     border-radius: 6px;
-    color: #52606d;
+    color: var(--color-text-muted);
     font: inherit;
     cursor: pointer;
 }
 
 .kanban-add-button:hover {
-    border-color: #2563eb;
-    color: #2563eb;
+    border-color: var(--color-accent);
+    color: var(--color-accent);
 }
 
 .kanban-add-form {
     display: flex;
     flex-direction: column;
     gap: 0.4rem;
-    background: #fff;
+    background: var(--color-surface);
     border-radius: 6px;
     padding: 0.6rem;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    box-shadow: 0 1px 2px var(--color-shadow-card);
 }
 
 .kanban-modal-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(15, 23, 42, 0.55);
+    background: var(--color-overlay);
     display: flex;
     align-items: flex-start;
     justify-content: center;
@@ -373,9 +507,9 @@ a:hover {
 }
 
 .kanban-modal {
-    background: #fff;
+    background: var(--color-surface);
     border-radius: 8px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 10px 30px var(--color-shadow-modal);
     width: 100%;
     max-width: 28rem;
     padding: 1rem 1.25rem 1.25rem;
@@ -391,7 +525,7 @@ a:hover {
 .kanban-modal-title {
     margin: 0;
     font-size: 1.05rem;
-    color: #1f2933;
+    color: var(--color-text);
     text-transform: none;
     letter-spacing: normal;
 }
@@ -401,13 +535,13 @@ a:hover {
     border: none;
     font-size: 1.5rem;
     line-height: 1;
-    color: #52606d;
+    color: var(--color-text-muted);
     cursor: pointer;
     padding: 0 0.25rem;
 }
 
 .kanban-modal-close:hover {
-    color: #1f2933;
+    color: var(--color-text);
 }
 
 .kanban-modal-form {
@@ -421,7 +555,7 @@ a:hover {
     flex-direction: column;
     gap: 0.25rem;
     font-size: 0.8rem;
-    color: #52606d;
+    color: var(--color-text-muted);
 }
 
 body.kanban-modal-open {
@@ -430,19 +564,21 @@ body.kanban-modal-open {
 
 .kanban-add-input {
     padding: 0.4rem 0.5rem;
-    border: 1px solid #cbd2d9;
+    border: 1px solid var(--color-border-strong);
     border-radius: 4px;
     font: inherit;
+    background: var(--color-surface);
+    color: var(--color-text);
 }
 
 .kanban-add-input:focus {
     outline: none;
-    border-color: #2563eb;
+    border-color: var(--color-accent);
 }
 
 .kanban-add-error {
     margin: 0;
-    color: #8a2a2a;
+    color: var(--color-danger);
     font-size: 0.8rem;
 }
 
@@ -461,22 +597,22 @@ body.kanban-modal-open {
 }
 
 .kanban-add-submit {
-    background: #2563eb;
-    color: #fff;
+    background: var(--color-accent);
+    color: var(--color-accent-text);
 }
 
 .kanban-add-submit:hover {
-    background: #1d4ed8;
+    background: var(--color-accent-hover);
 }
 
 .kanban-add-cancel {
     background: transparent;
-    border-color: #cbd2d9;
-    color: #52606d;
+    border-color: var(--color-border-strong);
+    color: var(--color-text-muted);
 }
 
 .kanban-add-cancel:hover {
-    border-color: #52606d;
+    border-color: var(--color-text-muted);
 }
 
 .kanban-card h4 {
@@ -487,13 +623,13 @@ body.kanban-modal-open {
 .kanban-description {
     margin: 0 0 0.5rem;
     font-size: 0.85rem;
-    color: #1f2933;
+    color: var(--color-text);
     white-space: pre-wrap;
     word-wrap: break-word;
 }
 
 .kanban-description-empty {
-    color: #9aa5b1;
+    color: var(--color-text-faint);
     font-style: italic;
 }
 
@@ -506,26 +642,26 @@ body.kanban-modal-open {
 .kanban-meta {
     margin: 0;
     font-size: 0.8rem;
-    color: #7b8794;
+    color: var(--color-text-subtle);
 }
 
 .kanban-time {
     margin-top: 0.25rem;
     font-weight: 600;
-    color: #52606d;
+    color: var(--color-text-muted);
 }
 
 .kanban-category .kanban-cat-parent {
-    color: #9aa5b1;
+    color: var(--color-text-faint);
 }
 
 .kanban-category .kanban-cat-sep {
-    color: #9aa5b1;
+    color: var(--color-text-faint);
     margin: 0 0.15rem;
 }
 
 .kanban-category .kanban-cat-leaf {
-    color: #52606d;
+    color: var(--color-text-muted);
     font-weight: 600;
 }
 
@@ -533,7 +669,7 @@ body.kanban-modal-open {
 .detail-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(31, 41, 51, 0.55);
+    background: var(--color-overlay-alt);
     display: flex;
     align-items: flex-start;
     justify-content: center;
@@ -547,11 +683,11 @@ body.kanban-modal-open {
 }
 
 .detail-modal {
-    background: #fff;
+    background: var(--color-surface);
     border-radius: 8px;
     width: 100%;
     max-width: 720px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 8px 24px var(--color-shadow-modal);
     padding: 1.5rem;
     position: relative;
 }
@@ -565,23 +701,23 @@ body.kanban-modal-open {
     font-size: 1.5rem;
     line-height: 1;
     cursor: pointer;
-    color: #52606d;
+    color: var(--color-text-muted);
 }
 
 .detail-close:hover {
-    color: #1f2933;
+    color: var(--color-text);
 }
 
 .detail-body h3 {
     margin: 0 0 1rem;
     font-size: 1.1rem;
-    color: #1f2933;
+    color: var(--color-text);
 }
 
 .detail-section {
     margin-top: 1.5rem;
     padding-top: 1rem;
-    border-top: 1px solid #e4e7eb;
+    border-top: 1px solid var(--color-border);
 }
 
 .detail-section:first-child {
@@ -595,7 +731,7 @@ body.kanban-modal-open {
     font-size: 0.95rem;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    color: #52606d;
+    color: var(--color-text-muted);
 }
 
 .detail-form {
@@ -609,7 +745,7 @@ body.kanban-modal-open {
     flex-direction: column;
     gap: 0.25rem;
     font-size: 0.85rem;
-    color: #52606d;
+    color: var(--color-text-muted);
 }
 
 .detail-field-full {
@@ -621,10 +757,10 @@ body.kanban-modal-open {
 .detail-field textarea {
     font: inherit;
     padding: 0.4rem 0.5rem;
-    border: 1px solid #cbd2d9;
+    border: 1px solid var(--color-border-strong);
     border-radius: 4px;
-    background: #fff;
-    color: #1f2933;
+    background: var(--color-surface);
+    color: var(--color-text);
 }
 
 .detail-field textarea {
@@ -636,8 +772,8 @@ body.kanban-modal-open {
 .detail-field select:focus,
 .detail-field textarea:focus {
     outline: none;
-    border-color: #2563eb;
-    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 2px var(--color-accent-ring);
 }
 
 .detail-actions {
@@ -649,8 +785,8 @@ body.kanban-modal-open {
 
 .detail-button {
     font: inherit;
-    background: #2563eb;
-    color: #fff;
+    background: var(--color-accent);
+    color: var(--color-accent-text);
     border: none;
     border-radius: 4px;
     padding: 0.45rem 0.9rem;
@@ -658,7 +794,7 @@ body.kanban-modal-open {
 }
 
 .detail-button:hover {
-    background: #1d4ed8;
+    background: var(--color-accent-hover);
 }
 
 .detail-button[disabled] {
@@ -669,12 +805,12 @@ body.kanban-modal-open {
 .detail-status {
     margin: 0;
     font-size: 0.85rem;
-    color: #52606d;
+    color: var(--color-text-muted);
 }
 
 .detail-error {
     margin: 0;
-    color: #8a2a2a;
+    color: var(--color-danger);
     font-size: 0.85rem;
 }
 
@@ -691,16 +827,16 @@ body.kanban-modal-open {
 .detail-entry,
 .detail-comment {
     padding: 0.5rem 0.75rem;
-    border: 1px solid #e4e7eb;
+    border: 1px solid var(--color-border);
     border-radius: 6px;
-    background: #f5f7fa;
+    background: var(--color-surface-nested);
     font-size: 0.9rem;
 }
 
 .detail-entry-meta,
 .detail-comment-meta {
     font-size: 0.75rem;
-    color: #7b8794;
+    color: var(--color-text-subtle);
     margin-bottom: 0.2rem;
 }
 
@@ -712,7 +848,7 @@ body.kanban-modal-open {
 
 .detail-entry-note {
     margin: 0.2rem 0 0;
-    color: #52606d;
+    color: var(--color-text-muted);
     white-space: pre-wrap;
     word-wrap: break-word;
 }
@@ -720,7 +856,7 @@ body.kanban-modal-open {
 .detail-empty {
     margin: 0 0 0.75rem;
     font-size: 0.85rem;
-    color: #9aa5b1;
+    color: var(--color-text-faint);
     font-style: italic;
 }
 
@@ -733,7 +869,7 @@ body.kanban-modal-open {
     font-size: 0.8rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #52606d;
+    color: var(--color-text-muted);
 }
 
 .detail-link-list {
@@ -751,10 +887,10 @@ body.kanban-modal-open {
     justify-content: space-between;
     gap: 0.5rem;
     padding: 0.35rem 0.5rem;
-    background: #f5f7fa;
+    background: var(--color-surface-nested);
     border-radius: 4px;
     font-size: 0.85rem;
-    color: #1f2933;
+    color: var(--color-text);
 }
 
 .detail-link-text {
@@ -764,9 +900,9 @@ body.kanban-modal-open {
 
 .detail-link-remove {
     background: transparent;
-    border: 1px solid #cbd2d9;
+    border: 1px solid var(--color-border-strong);
     border-radius: 4px;
-    color: #52606d;
+    color: var(--color-text-muted);
     font: inherit;
     font-size: 0.75rem;
     padding: 0.15rem 0.5rem;
@@ -774,8 +910,8 @@ body.kanban-modal-open {
 }
 
 .detail-link-remove:hover {
-    border-color: #8a2a2a;
-    color: #8a2a2a;
+    border-color: var(--color-danger);
+    color: var(--color-danger);
 }
 
 .detail-link-form {
@@ -811,11 +947,11 @@ body.kanban-modal-open {
 .release-group-title {
     margin: 0;
     padding-bottom: 0.35rem;
-    border-bottom: 2px solid #cbd2d9;
+    border-bottom: 2px solid var(--color-border-strong);
     font-size: 1rem;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    color: #52606d;
+    color: var(--color-text-muted);
 }
 
 .release-group-grid {
@@ -829,12 +965,12 @@ body.kanban-modal-open {
     font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    color: #9aa5b1;
+    color: var(--color-text-faint);
 }
 
 .release-project {
-    background: #fff;
-    border: 1px solid #e4e7eb;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
     border-radius: 8px;
     padding: 1rem 1.25rem;
     display: flex;
@@ -842,7 +978,7 @@ body.kanban-modal-open {
 }
 
 .release-project-header {
-    border-bottom: 1px solid #e4e7eb;
+    border-bottom: 1px solid var(--color-border);
     padding-bottom: 0.5rem;
     margin-bottom: 0.75rem;
 }
@@ -855,7 +991,7 @@ body.kanban-modal-open {
 .release-project-meta {
     margin: 0.25rem 0 0;
     font-size: 0.8rem;
-    color: #7b8794;
+    color: var(--color-text-subtle);
 }
 
 .release-list {
@@ -868,7 +1004,7 @@ body.kanban-modal-open {
 
 .release {
     padding: 0.5rem 0;
-    border-bottom: 1px dashed #e4e7eb;
+    border-bottom: 1px dashed var(--color-border);
 }
 
 .release:last-child {
@@ -880,9 +1016,9 @@ body.kanban-modal-open {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.85rem;
     font-weight: 600;
-    color: #1f2933;
-    background: #f5f7fa;
-    border: 1px solid #e4e7eb;
+    color: var(--color-text);
+    background: var(--color-surface-nested);
+    border: 1px solid var(--color-border);
     border-radius: 4px;
     padding: 0.05rem 0.4rem;
     margin-right: 0.5rem;
@@ -890,13 +1026,13 @@ body.kanban-modal-open {
 
 .release-date {
     font-size: 0.8rem;
-    color: #7b8794;
+    color: var(--color-text-subtle);
 }
 
 .release-notes {
     margin: 0.25rem 0 0;
     font-size: 0.9rem;
-    color: #52606d;
+    color: var(--color-text-muted);
 }
 
 .release-issues {
@@ -931,8 +1067,8 @@ body.kanban-modal-open {
 /* Time table */
 .table-wrap {
     overflow-x: auto;
-    background: #fff;
-    border: 1px solid #e4e7eb;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
     border-radius: 8px;
 }
 
@@ -943,7 +1079,7 @@ body.kanban-modal-open {
 .time-week-title {
     margin: 0 0 0.75rem;
     font-size: 1rem;
-    color: #52606d;
+    color: var(--color-text-muted);
 }
 
 .time-table {
@@ -956,23 +1092,23 @@ body.kanban-modal-open {
 .time-table td {
     padding: 0.6rem 0.9rem;
     text-align: right;
-    border-bottom: 1px solid #e4e7eb;
+    border-bottom: 1px solid var(--color-border);
 }
 
 .time-table thead th,
 .time-table tbody th {
     text-align: left;
-    background: #f5f7fa;
+    background: var(--color-surface-nested);
 }
 
 .time-table tfoot th,
 .time-table tfoot td {
-    background: #f5f7fa;
+    background: var(--color-surface-nested);
     font-weight: 600;
     border-bottom: none;
 }
 
 .time-table .total {
     font-weight: 600;
-    color: #1f2933;
+    color: var(--color-text);
 }
