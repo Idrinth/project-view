@@ -166,6 +166,15 @@ a:hover {
     font-size: 0.875rem;
 }
 
+.footer-nav {
+    margin-bottom: 0.5rem;
+}
+
+.footer-nav a {
+    color: #52606d;
+    margin: 0 0.5rem;
+}
+
 .muted {
     color: #7b8794;
 }
