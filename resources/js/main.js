@@ -288,8 +288,14 @@
             });
         }
 
+        var description = typeof card.description === 'string' ? card.description : '';
+        var descriptionNode = description !== ''
+            ? el('p', { className: 'kanban-description', text: description })
+            : el('p', { className: 'kanban-description kanban-description-empty', text: 'No description' });
+
         var cardEl = el('article', { className: 'kanban-card' }, [
             el('h4', { text: card.title }),
+            descriptionNode,
             categoryNode,
             el('p', { className: 'kanban-meta', text: 'Milestone: ' + (card.milestone || '\u2014') }),
             el('p', { className: 'kanban-meta' }, ['Work started: ', dateOrDash(card.workStarted)]),
@@ -410,6 +416,11 @@
             required: 'required',
             className: 'kanban-add-input'
         });
+        var descriptionInput = el('textarea', {
+            placeholder: 'Description (what is this todo about?)',
+            rows: '3',
+            className: 'kanban-add-input kanban-add-description'
+        });
         var categoryInput = el('input', {
             type: 'text',
             placeholder: 'Category (e.g. Mods / Skyrim / Idrinth Thalui)',
@@ -433,6 +444,7 @@
         var errorNode = el('p', { className: 'kanban-add-error', hidden: 'hidden' });
         var actions = el('div', { className: 'kanban-add-actions' }, [submitBtn, cancelBtn]);
         form.appendChild(titleInput);
+        form.appendChild(descriptionInput);
         form.appendChild(categoryInput);
         form.appendChild(milestoneInput);
         form.appendChild(errorNode);
@@ -463,6 +475,7 @@
             var payload = {
                 column: columnId,
                 title: title,
+                description: descriptionInput.value.trim(),
                 category: categoryInput.value.trim() || 'Uncategorised',
                 milestone: milestoneInput.value.trim() || null
             };
@@ -475,6 +488,7 @@
                     var card = buildCardEl({
                         id: created.id != null ? created.id : null,
                         title: created.title || payload.title,
+                        description: typeof created.description === 'string' ? created.description : payload.description,
                         category: created.category || payload.category,
                         categoryPath: Array.isArray(created.categoryPath) ? created.categoryPath : null,
                         milestone: created.milestone != null ? created.milestone : payload.milestone,

@@ -39,16 +39,17 @@ final class Issues
         string $title,
         string $status = self::STATUS_TODO,
         ?string $workStartedAt = null,
-        ?string $workCompletedAt = null
+        ?string $workCompletedAt = null,
+        ?string $description = null
     ): int {
         self::assertStatus($status);
         $now = gmdate('c');
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO issues (
-                 project_id, milestone_id, title, status,
+                 project_id, milestone_id, title, description, status,
                  work_started_at, work_completed_at, created_at, updated_at
              ) VALUES (
-                 :project_id, :milestone_id, :title, :status,
+                 :project_id, :milestone_id, :title, :description, :status,
                  :work_started_at, :work_completed_at, :created_at, :updated_at
              )'
         );
@@ -56,6 +57,7 @@ final class Issues
             'project_id'        => $projectId,
             'milestone_id'      => $milestoneId,
             'title'             => $title,
+            'description'       => $description,
             'status'            => $status,
             'work_started_at'   => $workStartedAt,
             'work_completed_at' => $workCompletedAt,
@@ -129,12 +131,14 @@ final class Issues
         ?int $milestoneId,
         string $status,
         ?string $workStartedAt,
-        ?string $workCompletedAt
+        ?string $workCompletedAt,
+        ?string $description = null
     ): void {
         self::assertStatus($status);
         $stmt = $this->db->pdo()->prepare(
             'UPDATE issues SET
                 title = :title,
+                description = :description,
                 milestone_id = :milestone_id,
                 status = :status,
                 work_started_at = :work_started_at,
@@ -145,6 +149,7 @@ final class Issues
         $stmt->execute([
             'id'                => $id,
             'title'             => $title,
+            'description'       => $description,
             'milestone_id'      => $milestoneId,
             'status'            => $status,
             'work_started_at'   => $workStartedAt,

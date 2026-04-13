@@ -115,6 +115,13 @@ final class Database
         // above so the column is always present when the index is
         // built; IF NOT EXISTS keeps it a no-op on later runs.
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_projects_parent ON projects(parent_id)');
+
+        if (!$this->hasColumn('issues', 'description')) {
+            // Adds the free-form description column for installs that
+            // predate it. Existing rows get NULL, which renders as
+            // "no description" in the UI.
+            $this->pdo->exec('ALTER TABLE issues ADD COLUMN description TEXT NULL');
+        }
     }
 
     /**
@@ -220,6 +227,7 @@ final class Database
                 project_id INTEGER NOT NULL,
                 milestone_id INTEGER NULL,
                 title TEXT NOT NULL,
+                description TEXT NULL,
                 status TEXT NOT NULL DEFAULT 'todo',
                 position INTEGER NOT NULL DEFAULT 0,
                 work_started_at TEXT NULL,
