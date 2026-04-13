@@ -116,11 +116,113 @@ final class Database
         // built; IF NOT EXISTS keeps it a no-op on later runs.
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_projects_parent ON projects(parent_id)');
 
+        // Pre-hierarchy installs declared `projects.name` as globally
+        // UNIQUE, which now blocks siblings under different parents
+        // from sharing a name (the kanban-add endpoint hits this as a
+        // "UNIQUE constraint failed: projects.name" 500 when users
+        // type a category like "Mods/Warhammer III/Idrinth Thalui"
+        // while another "Idrinth Thalui" already lives under Skyrim).
+        // The current schema uses UNIQUE(parent_id, name) instead, so
+        // drop the legacy standalone constraint when we spot it.
+        if ($this->pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'sqlite'
+            && $this->hasLegacyProjectNameUnique()) {
+            $this->rebuildProjectsTable();
+        }
+
         if (!$this->hasColumn('issues', 'description')) {
             // Adds the free-form description column for installs that
             // predate it. Existing rows get NULL, which renders as
             // "no description" in the UI.
             $this->pdo->exec('ALTER TABLE issues ADD COLUMN description TEXT NULL');
+        }
+    }
+
+    /**
+     * Detect the legacy single-column UNIQUE(name) constraint on the
+     * projects table (inline `name TEXT NOT NULL UNIQUE` from the
+     * pre-hierarchy schema). Only called on SQLite; other drivers
+     * need their own migration path.
+     */
+    private function hasLegacyProjectNameUnique(): bool
+    {
+        $stmt = $this->pdo->query('PRAGMA index_list(projects)');
+        if ($stmt === false) {
+            return false;
+        }
+        /** @var list<array<string, mixed>> $indexes */
+        $indexes = $stmt->fetchAll();
+        foreach ($indexes as $idx) {
+            if (!isset($idx['unique']) || (int) $idx['unique'] !== 1) {
+                continue;
+            }
+            $name = isset($idx['name']) ? (string) $idx['name'] : '';
+            if ($name === '') {
+                continue;
+            }
+            $cols = $this->pdo->query(
+                "PRAGMA index_info('" . str_replace("'", "''", $name) . "')"
+            );
+            if ($cols === false) {
+                continue;
+            }
+            /** @var list<array<string, mixed>> $columns */
+            $columns = $cols->fetchAll();
+            if (count($columns) === 1
+                && isset($columns[0]['name'])
+                && (string) $columns[0]['name'] === 'name') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Rebuild the projects table to match the current schema,
+     * preserving existing rows. SQLite cannot drop a column-level
+     * UNIQUE constraint in place, so we copy into a fresh table with
+     * the correct shape, drop the old one and rename. Foreign keys
+     * are temporarily disabled so dropping the old table does not
+     * cascade into child rows (milestones, issues, ...) whose FKs
+     * are re-bound to the renamed table afterwards.
+     */
+    private function rebuildProjectsTable(): void
+    {
+        // PRAGMA foreign_keys is a no-op inside a transaction, so
+        // toggle it before we start one.
+        $this->pdo->exec('PRAGMA foreign_keys = OFF');
+        try {
+            $this->pdo->beginTransaction();
+            try {
+                // The parent-index is auto-dropped with the old table,
+                // but it may also not exist yet on very old installs;
+                // either way, we recreate it from scratch below.
+                $this->pdo->exec('DROP INDEX IF EXISTS idx_projects_parent');
+                $this->pdo->exec(
+                    'CREATE TABLE projects_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        parent_id INTEGER NULL,
+                        name TEXT NOT NULL,
+                        slug TEXT NOT NULL UNIQUE,
+                        description TEXT NULL,
+                        created_at TEXT NOT NULL,
+                        UNIQUE (parent_id, name),
+                        FOREIGN KEY (parent_id) REFERENCES projects(id) ON DELETE CASCADE
+                    )'
+                );
+                $this->pdo->exec(
+                    'INSERT INTO projects_new (id, parent_id, name, slug, description, created_at)
+                     SELECT id, parent_id, name, slug, description, created_at FROM projects'
+                );
+                $this->pdo->exec('DROP TABLE projects');
+                $this->pdo->exec('ALTER TABLE projects_new RENAME TO projects');
+                $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_projects_parent ON projects(parent_id)');
+                $this->pdo->commit();
+            } catch (\Throwable $e) {
+                $this->pdo->rollBack();
+                throw $e;
+            }
+        } finally {
+            $this->pdo->exec('PRAGMA foreign_keys = ON');
         }
     }
 
