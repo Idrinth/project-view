@@ -85,6 +85,47 @@
         }
 
         render();
+
+        // Passively re-fetch the view payload every ~10 minutes so
+        // viewers see newly-added cards and edits without reloading.
+        // Ticks are skipped when the user is mid-interaction (drag,
+        // open modal) or the tab is hidden, and network errors are
+        // swallowed so a transient hiccup just keeps the last data.
+        setInterval(function () {
+            if (isRefreshBusy()) {
+                return;
+            }
+            if (typeof document.hidden === 'boolean' && document.hidden) {
+                return;
+            }
+            fetchEndpoint(view).then(function (fresh) {
+                data = fresh;
+                ensureCategoryDatalist(collectCategoryPaths(view, data));
+                render();
+            }).catch(function () {
+                /* ignore - keep showing the previous data */
+            });
+        }, AUTO_REFRESH_MS);
+    }
+
+    // How often the view polls the API for fresh data.
+    var AUTO_REFRESH_MS = 10 * 60 * 1000;
+
+    // True while the user is interacting with something that a silent
+    // re-render would disrupt: dragging a card, or with the add-card
+    // or card-detail modal open.
+    function isRefreshBusy() {
+        if (draggedCard) {
+            return true;
+        }
+        if (document.body.classList.contains('kanban-modal-open')) {
+            return true;
+        }
+        var detail = document.querySelector('[data-detail-overlay]');
+        if (detail && !detail.hidden) {
+            return true;
+        }
+        return false;
     }
 
     // Shared id used by both the filter input and the kanban add-card
