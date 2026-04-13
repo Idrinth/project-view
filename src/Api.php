@@ -42,6 +42,10 @@ final class Api
                 return $this->me();
             case 'kanban':
                 return $this->kanban();
+            case 'kanban-add':
+                return $this->kanbanAdd($method, $body);
+            case 'kanban-move':
+                return $this->kanbanMove($method, $body);
             case 'releases':
                 return $this->releases();
             case 'time':
@@ -49,6 +53,20 @@ final class Api
             default:
                 throw new \InvalidArgumentException("unknown endpoint: {$endpoint}");
         }
+    }
+
+    /**
+     * Ensure the current request is authenticated and return the username.
+     *
+     * @throws UnauthorizedException when no valid session is present.
+     */
+    private function requireUser(): string
+    {
+        $user = $this->auth->currentUser();
+        if ($user === null) {
+            throw new UnauthorizedException('not signed in');
+        }
+        return $user;
     }
 
     /**
@@ -184,6 +202,65 @@ final class Api
                 ],
             ],
         ];
+    }
+
+    /**
+     * Accept a request to add a new card to a kanban column.
+     *
+     * The request must be authenticated. The payload is validated but
+     * not yet persisted anywhere; this endpoint exists so the frontend
+     * can wire edits through the backend while storage is still to be
+     * built out.
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private function kanbanAdd(string $method, array $body): array
+    {
+        if ($method !== 'POST') {
+            throw new BadRequestException('kanban-add requires POST');
+        }
+        $this->requireUser();
+
+        $column = isset($body['column']) && is_string($body['column']) ? $body['column'] : '';
+        $title  = isset($body['title'])  && is_string($body['title'])  ? trim($body['title']) : '';
+        if ($column === '' || $title === '') {
+            throw new BadRequestException('column and title are required');
+        }
+
+        // TODO: persist the new card. For now the change is accepted
+        // without being stored so the frontend can wire up edits.
+        return ['ok' => true];
+    }
+
+    /**
+     * Accept a request to move a kanban card between columns or
+     * within a column.
+     *
+     * The request must be authenticated. The payload is validated but
+     * not yet persisted anywhere; this endpoint exists so the frontend
+     * can wire edits through the backend while storage is still to be
+     * built out.
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private function kanbanMove(string $method, array $body): array
+    {
+        if ($method !== 'POST') {
+            throw new BadRequestException('kanban-move requires POST');
+        }
+        $this->requireUser();
+
+        $title = isset($body['title']) && is_string($body['title']) ? trim($body['title']) : '';
+        $to    = isset($body['to'])    && is_string($body['to'])    ? $body['to'] : '';
+        if ($title === '' || $to === '') {
+            throw new BadRequestException('title and to are required');
+        }
+
+        // TODO: persist the move. For now the change is accepted
+        // without being stored so the frontend can wire up edits.
+        return ['ok' => true];
     }
 
     /**
