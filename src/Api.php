@@ -137,11 +137,19 @@ final class Api
     }
 
     /**
+     * Separator used in category path strings exchanged with the
+     * frontend (e.g. "Mods / Skyrim / Idrinth Thalui").
+     */
+    private const CATEGORY_PATH_SEPARATOR = ' / ';
+
+    /**
      * Build the kanban board payload. Issues are grouped by status
      * into the four fixed columns; within each column they are
      * ordered by `position` then id so drag-and-drop ordering is
-     * preserved. Project name is surfaced as the card's "category"
-     * (the UI's label for projects) and time totals come from the
+     * preserved. Each card carries the full breadcrumb of its
+     * project ("categoryPath") so the UI can group cards under
+     * umbrella categories. `category` is the collapsed-to-one-line
+     * path for backwards compatibility. Time totals come from the
      * `time_aggregates` cache.
      *
      * @return array<string, mixed>
@@ -158,7 +166,7 @@ final class Api
         $stmt = $this->db->pdo()->query(
             'SELECT i.id, i.title, i.status, i.position,
                     i.work_started_at, i.work_completed_at,
-                    p.name AS project_name,
+                    p.id AS project_id,
                     m.name AS milestone_name
                FROM issues i
                JOIN projects p ON p.id = i.project_id
@@ -167,6 +175,10 @@ final class Api
         );
         /** @var list<array<string, mixed>> $rows */
         $rows = $stmt === false ? [] : $stmt->fetchAll();
+
+        // Pre-compute breadcrumbs for every project so the card loop
+        // below does not issue a parent-chain query per row.
+        $paths = $this->projects->allPaths();
 
         // Pull the cross-category totals for every issue in one query
         // so the card list doesn't issue N+1 lookups. Missing rows are
@@ -205,10 +217,13 @@ final class Api
                 continue;
             }
             $id = (int) $row['id'];
+            $projectId = (int) $row['project_id'];
+            $path = $paths[$projectId] ?? [];
             $columns[$status]['cards'][] = [
                 'id'            => $id,
                 'title'         => (string) $row['title'],
-                'category'      => (string) $row['project_name'],
+                'category'      => implode(self::CATEGORY_PATH_SEPARATOR, $path),
+                'categoryPath'  => $path,
                 'milestone'     => $row['milestone_name'] !== null ? (string) $row['milestone_name'] : null,
                 'workStarted'   => $row['work_started_at'] !== null ? (string) $row['work_started_at'] : null,
                 'workCompleted' => $row['work_completed_at'] !== null ? (string) $row['work_completed_at'] : null,
@@ -251,7 +266,7 @@ final class Api
             $category = 'Uncategorised';
         }
 
-        $projectId = $this->resolveProjectIdByName($category);
+        [$projectId, $path] = $this->resolveProjectIdByPath($category);
         $milestoneId = null;
         if ($milestone !== '') {
             $milestoneId = $this->resolveMilestoneIdByName($projectId, $milestone);
@@ -272,7 +287,8 @@ final class Api
             'card' => [
                 'id'            => $issueId,
                 'title'         => $title,
-                'category'      => $category,
+                'category'      => implode(self::CATEGORY_PATH_SEPARATOR, $path),
+                'categoryPath'  => $path,
                 'milestone'     => $milestone !== '' ? $milestone : null,
                 'workStarted'   => null,
                 'workCompleted' => null,
@@ -371,19 +387,50 @@ final class Api
     }
 
     /**
-     * Find the project row by name, creating it with a slugified
-     * identifier if it does not yet exist. Slug collisions are
-     * resolved by appending a numeric suffix.
+     * Resolve a category path like "Mods / Skyrim / Idrinth Thalui"
+     * to a leaf project id, creating any missing intermediate nodes
+     * along the way. Accepts either the " / " separator used by the
+     * UI or a plain "/" so typing on mobile is less finicky. Empty
+     * path segments are dropped; a wholly empty path falls back to
+     * a single "Uncategorised" root.
+     *
+     * @return array{0: int, 1: list<string>} id of the leaf project
+     *   and its full breadcrumb (including the leaf itself).
      */
-    private function resolveProjectIdByName(string $name): int
+    private function resolveProjectIdByPath(string $path): array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT id FROM projects WHERE name = :name');
-        $stmt->execute(['name' => $name]);
-        $row = $stmt->fetch();
-        if ($row !== false) {
-            return (int) $row['id'];
+        $segments = [];
+        foreach (preg_split('#/#', $path) ?: [] as $piece) {
+            $trimmed = trim((string) $piece);
+            if ($trimmed !== '') {
+                $segments[] = $trimmed;
+            }
+        }
+        if ($segments === []) {
+            $segments = ['Uncategorised'];
         }
 
+        $parentId = null;
+        $leafId = 0;
+        foreach ($segments as $name) {
+            $existing = $this->projects->findByParentAndName($parentId, $name);
+            if ($existing !== null) {
+                $leafId = (int) $existing['id'];
+            } else {
+                $leafId = $this->projects->create($name, $this->uniqueSlug($name), $parentId);
+            }
+            $parentId = $leafId;
+        }
+        return [$leafId, $segments];
+    }
+
+    /**
+     * Produce a globally unique slug based on `$name`. The base slug
+     * is slugified from the name; collisions are resolved by
+     * appending a numeric suffix.
+     */
+    private function uniqueSlug(string $name): string
+    {
         $base = self::slugify($name);
         if ($base === '') {
             $base = 'project';
@@ -394,7 +441,7 @@ final class Api
             $slug = $base . '-' . $suffix;
             $suffix++;
         }
-        return $this->projects->create($name, $slug);
+        return $slug;
     }
 
     /**
@@ -440,12 +487,17 @@ final class Api
      * release-date order. Unreleased milestones are intentionally
      * omitted from this view.
      *
+     * Every project carries its full `path` breadcrumb so the
+     * frontend can group projects under their umbrella categories
+     * ("Mods", "Open Source", ...).
+     *
      * @return array<string, mixed>
      */
     private function releases(): array
     {
         $stmt = $this->db->pdo()->query(
-            'SELECT p.name AS project_name,
+            'SELECT p.id AS project_id,
+                    p.name AS project_name,
                     m.name AS milestone_name,
                     m.released_at,
                     m.notes
@@ -457,16 +509,22 @@ final class Api
         /** @var list<array<string, mixed>> $rows */
         $rows = $stmt === false ? [] : $stmt->fetchAll();
 
+        $paths = $this->projects->allPaths();
+
         $projects = [];
         foreach ($rows as $row) {
-            $name = (string) $row['project_name'];
-            if (!isset($projects[$name])) {
-                $projects[$name] = [
-                    'name'     => $name,
+            $projectId = (int) $row['project_id'];
+            $path = $paths[$projectId] ?? [(string) $row['project_name']];
+            $key = implode(self::CATEGORY_PATH_SEPARATOR, $path);
+            if (!isset($projects[$key])) {
+                $projects[$key] = [
+                    'name'     => (string) $row['project_name'],
+                    'path'     => $path,
+                    'group'    => $path[0] ?? (string) $row['project_name'],
                     'releases' => [],
                 ];
             }
-            $projects[$name]['releases'][] = [
+            $projects[$key]['releases'][] = [
                 'version' => (string) $row['milestone_name'],
                 'date'    => (string) $row['released_at'],
                 'notes'   => $row['notes'] !== null ? (string) $row['notes'] : '',

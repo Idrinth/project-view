@@ -80,14 +80,69 @@ final class Database
     /**
      * Create every table and index in the schema if missing. Safe to
      * run more than once: every statement uses IF NOT EXISTS, so a
-     * second invocation is a no-op. Replace this with a real
-     * migration tool once the schema needs to change in place.
+     * second invocation is a no-op.
+     *
+     * A small set of in-place upgrades (adding newly introduced
+     * columns on older installs) runs after the CREATE statements so
+     * existing databases pick up new features without losing data.
+     * Replace this with a real migration tool once the schema needs
+     * to change in a way these idempotent helpers cannot express.
      */
     public function migrate(): void
     {
         foreach (self::schema() as $sql) {
             $this->pdo->exec($sql);
         }
+        $this->applyInPlaceMigrations();
+    }
+
+    /**
+     * Idempotent upgrades for schemas that predate a column. Each
+     * branch checks for the absence of the column and adds it with a
+     * backwards-compatible default.
+     */
+    private function applyInPlaceMigrations(): void
+    {
+        if (!$this->hasColumn('projects', 'parent_id')) {
+            // Adds the self-referencing grouping column for installs
+            // that predate the project hierarchy. New installs get
+            // the column from schema()'s CREATE TABLE already.
+            $this->pdo->exec(
+                'ALTER TABLE projects ADD COLUMN parent_id INTEGER NULL REFERENCES projects(id) ON DELETE CASCADE'
+            );
+        }
+        // Ensure the companion index exists. Runs after the ALTER
+        // above so the column is always present when the index is
+        // built; IF NOT EXISTS keeps it a no-op on later runs.
+        $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_projects_parent ON projects(parent_id)');
+    }
+
+    /**
+     * Introspect whether `$table` has `$column`. Supports SQLite
+     * (PRAGMA) and any driver that exposes `information_schema`.
+     */
+    private function hasColumn(string $table, string $column): bool
+    {
+        $driver = $this->pdo->getAttribute(\PDO::ATTR_DRIVER_NAME);
+        if ($driver === 'sqlite') {
+            $stmt = $this->pdo->query('PRAGMA table_info(' . $table . ')');
+            if ($stmt === false) {
+                return false;
+            }
+            foreach ($stmt->fetchAll() as $row) {
+                if (isset($row['name']) && (string) $row['name'] === $column) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT COUNT(*) AS c FROM information_schema.columns
+              WHERE table_name = :t AND column_name = :c'
+        );
+        $stmt->execute(['t' => $table, 'c' => $column]);
+        $row = $stmt->fetch();
+        return $row !== false && (int) $row['c'] > 0;
     }
 
     /**
@@ -111,15 +166,33 @@ final class Database
             )",
 
             // projects (aka "categories" in the UI) — the actual
-            // things being built or managed. Milestones and issues
-            // hang off a project.
+            // things being built or managed. Rows form a tree: every
+            // project optionally points at a `parent_id` so the UI
+            // can group related projects ("Mods > Skyrim > Idrinth
+            // Thalui"). Roots have parent_id NULL. Milestones and
+            // issues may hang off any node; in practice they live on
+            // the leaves but the schema does not enforce that.
+            //
+            // Name uniqueness is scoped to a parent so sibling
+            // projects under different parents can share a name
+            // ("Idrinth Thalui" under both Skyrim and Warhammer III).
+            // Slugs stay globally unique because they are used as
+            // URL identifiers.
             "CREATE TABLE IF NOT EXISTS projects (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
+                parent_id INTEGER NULL,
+                name TEXT NOT NULL,
                 slug TEXT NOT NULL UNIQUE,
                 description TEXT NULL,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                UNIQUE (parent_id, name),
+                FOREIGN KEY (parent_id) REFERENCES projects(id) ON DELETE CASCADE
             )",
+            // The parent_id index is added by applyInPlaceMigrations()
+            // after the column has been guaranteed to exist, so the
+            // same code path works for both fresh installs (column
+            // present from the CREATE TABLE above) and older installs
+            // being upgraded (column just added by ALTER TABLE).
 
             // milestones (aka "releases") — named version markers
             // that belong to a project. released_at is null for

@@ -94,8 +94,17 @@ php bin/migrate.php
 alongside it in `src/`:
 
 - `projects` (`src/Projects.php`) - projects aka categories: the
-  actual things being built or managed. Milestones and issues hang
-  off a project.
+  actual things being built or managed. Rows form a tree via
+  `parent_id`, so the UI can group related projects under umbrella
+  categories (e.g. `Mods > Skyrim > Idrinth Thalui`, or
+  `Open Source > idrinth-api-bench`). Root-level categories have
+  `parent_id IS NULL`. Name uniqueness is scoped to `(parent_id,
+  name)` so siblings under different parents may share a name;
+  slugs stay globally unique because they act as URL identifiers.
+  The API accepts a category path (segments separated by `/`) when
+  creating a card - missing intermediate nodes are auto-created.
+  Milestones and issues hang off a project - typically the leaf,
+  though the schema does not enforce that.
 - `milestones` (`src/Milestones.php`) - named version markers per
   project. These are what the releases page surfaces; the two names
   refer to the same rows.

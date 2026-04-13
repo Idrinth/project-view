@@ -350,12 +350,62 @@ a:hover {
     color: #52606d;
 }
 
+.kanban-category .kanban-cat-parent {
+    color: #9aa5b1;
+}
+
+.kanban-category .kanban-cat-sep {
+    color: #9aa5b1;
+    margin: 0 0.15rem;
+}
+
+.kanban-category .kanban-cat-leaf {
+    color: #52606d;
+    font-weight: 600;
+}
+
 /* Releases */
 .releases {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
     gap: 1rem;
     margin-top: 1.5rem;
+}
+
+.release-group {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+}
+
+.release-group + .release-group {
+    margin-top: 1.5rem;
+}
+
+.release-group-title {
+    margin: 0;
+    padding-bottom: 0.35rem;
+    border-bottom: 2px solid #cbd2d9;
+    font-size: 1rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #52606d;
+}
+
+.release-group-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 1rem;
+}
+
+.release-project-path {
+    margin: 0.15rem 0 0;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #9aa5b1;
 }
 
 .release-project {
