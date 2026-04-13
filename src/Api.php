@@ -21,6 +21,7 @@ require_once __DIR__ . '/IssueLinks.php';
 require_once __DIR__ . '/TimeEntries.php';
 require_once __DIR__ . '/TimeAggregates.php';
 require_once __DIR__ . '/Comments.php';
+require_once __DIR__ . '/Users.php';
 
 final class Api
 {
@@ -33,6 +34,7 @@ final class Api
     private TimeEntries $timeEntries;
     private TimeAggregates $timeAggregates;
     private Comments $comments;
+    private Users $users;
 
     public function __construct(?Auth $auth = null, ?Database $db = null)
     {
@@ -45,6 +47,7 @@ final class Api
         $this->timeEntries = new TimeEntries($this->db);
         $this->timeAggregates = new TimeAggregates($this->db);
         $this->comments = new Comments($this->db);
+        $this->users = new Users($this->db);
     }
 
     /**
@@ -87,6 +90,10 @@ final class Api
                 return $this->releases();
             case 'time':
                 return $this->time();
+            case 'profile':
+                return $this->profile($method, $body);
+            case 'profile-picture':
+                return $this->profilePicture($method, $body);
             default:
                 throw new \InvalidArgumentException("unknown endpoint: {$endpoint}");
         }
@@ -151,7 +158,230 @@ final class Api
         if ($user === null) {
             throw new UnauthorizedException('not signed in');
         }
-        return ['user' => ['name' => $user]];
+        // Surface the display name (when set) so the nav can address
+        // the user by how they prefer to be named without also having
+        // to pull the full profile — including the avatar — on every
+        // page load.
+        $row = $this->users->findByUsername($user);
+        $displayName = '';
+        if (is_array($row) && isset($row['display_name']) && is_string($row['display_name'])) {
+            $displayName = trim($row['display_name']);
+        }
+        return [
+            'user' => [
+                'name'        => $user,
+                'displayName' => $displayName,
+            ],
+        ];
+    }
+
+    /**
+     * Return (GET) or update (POST) the current user's self-service
+     * profile: display name, website URL, short about blurb and an
+     * optional avatar. The avatar is surfaced as a data URL so the
+     * page can render it without a second round trip.
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private function profile(string $method, array $body): array
+    {
+        $username = $this->requireUser();
+        $row = $this->users->findByUsername($username);
+        if (!is_array($row) || !isset($row['id'])) {
+            // The cookie decoded, but the account was deleted in the
+            // meantime. Treat that as unauthenticated.
+            throw new UnauthorizedException('not signed in');
+        }
+        $id = (int) $row['id'];
+
+        if ($method === 'GET') {
+            return ['profile' => self::profilePayload($row)];
+        }
+        if ($method !== 'POST') {
+            throw new BadRequestException('profile requires GET or POST');
+        }
+
+        $displayName = self::sanitizeProfileText($body['displayName'] ?? '', 80);
+        $about       = self::sanitizeProfileText($body['about'] ?? '', 500);
+        $websiteUrl  = self::sanitizeWebsiteUrl($body['websiteUrl'] ?? '');
+
+        $this->users->updateProfile($id, $displayName, $websiteUrl, $about);
+
+        $fresh = $this->users->findByUsername($username) ?? $row;
+        return ['profile' => self::profilePayload($fresh)];
+    }
+
+    /**
+     * Set (POST) or clear (DELETE) the current user's avatar. The
+     * image is posted as a base64 data URL (or `{mime, data}` pair)
+     * and stored inline in the users table so the build step cannot
+     * strand uploaded files in `public/`.
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private function profilePicture(string $method, array $body): array
+    {
+        $username = $this->requireUser();
+        $row = $this->users->findByUsername($username);
+        if (!is_array($row) || !isset($row['id'])) {
+            throw new UnauthorizedException('not signed in');
+        }
+        $id = (int) $row['id'];
+
+        if ($method === 'DELETE' || ($method === 'POST' && ($body['clear'] ?? false) === true)) {
+            $this->users->clearAvatar($id);
+            $fresh = $this->users->findByUsername($username) ?? $row;
+            return ['profile' => self::profilePayload($fresh)];
+        }
+        if ($method !== 'POST') {
+            throw new BadRequestException('profile-picture requires POST or DELETE');
+        }
+
+        [$mime, $base64] = self::parseAvatarUpload($body);
+        $this->users->setAvatar($id, $mime, $base64);
+
+        $fresh = $this->users->findByUsername($username) ?? $row;
+        return ['profile' => self::profilePayload($fresh)];
+    }
+
+    /**
+     * Shape a raw users row as the JSON profile payload. Keeps the
+     * sensitive bits (password hash) out of the response and folds the
+     * avatar into a single `avatar` data URL so the frontend can drop
+     * it straight into an <img>.
+     *
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private static function profilePayload(array $row): array
+    {
+        $avatar = null;
+        $mime = isset($row['avatar_mime']) && is_string($row['avatar_mime']) ? $row['avatar_mime'] : '';
+        $data = isset($row['avatar_data']) && is_string($row['avatar_data']) ? $row['avatar_data'] : '';
+        if ($mime !== '' && $data !== '') {
+            $avatar = 'data:' . $mime . ';base64,' . $data;
+        }
+        return [
+            'username'    => isset($row['username']) ? (string) $row['username'] : '',
+            'displayName' => isset($row['display_name']) && is_string($row['display_name'])
+                ? $row['display_name']
+                : '',
+            'websiteUrl'  => isset($row['website_url']) && is_string($row['website_url'])
+                ? $row['website_url']
+                : '',
+            'about'       => isset($row['about']) && is_string($row['about']) ? $row['about'] : '',
+            'avatar'      => $avatar,
+        ];
+    }
+
+    /**
+     * Trim and length-cap a free-form profile text field. Control
+     * characters other than tab, newline and carriage return are
+     * dropped so the stored value is safe to render as-is.
+     */
+    private static function sanitizeProfileText(mixed $value, int $maxLength): string
+    {
+        if (!is_string($value)) {
+            return '';
+        }
+        $value = trim($value);
+        if ($value === '') {
+            return '';
+        }
+        $value = (string) preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $value);
+        if (function_exists('mb_substr')) {
+            $value = mb_substr($value, 0, $maxLength);
+        } elseif (strlen($value) > $maxLength) {
+            $value = substr($value, 0, $maxLength);
+        }
+        return $value;
+    }
+
+    /**
+     * Validate an optional http(s) website URL. Empty values are
+     * allowed (the field is optional); anything else must parse as a
+     * URL with an http or https scheme so we never hand the UI a
+     * `javascript:` link it would dutifully click through.
+     */
+    private static function sanitizeWebsiteUrl(mixed $value): string
+    {
+        if (!is_string($value)) {
+            return '';
+        }
+        $value = trim($value);
+        if ($value === '') {
+            return '';
+        }
+        if (strlen($value) > 255) {
+            throw new BadRequestException('website URL is too long');
+        }
+        if (filter_var($value, FILTER_VALIDATE_URL) === false) {
+            throw new BadRequestException('website URL is not a valid URL');
+        }
+        $scheme = strtolower((string) parse_url($value, PHP_URL_SCHEME));
+        if ($scheme !== 'http' && $scheme !== 'https') {
+            throw new BadRequestException('website URL must be http or https');
+        }
+        return $value;
+    }
+
+    /**
+     * Extract the (mime, base64) tuple from an avatar upload. Accepts
+     * either a `data:<mime>;base64,<bytes>` URL in `image` or a
+     * `{mime, data}` pair. Rejects payloads outside the small
+     * allowlist of web image formats or over the per-user size cap.
+     *
+     * @param array<string, mixed> $body
+     * @return array{0: string, 1: string}
+     */
+    private static function parseAvatarUpload(array $body): array
+    {
+        $mime = '';
+        $base64 = '';
+
+        if (isset($body['image']) && is_string($body['image']) && $body['image'] !== '') {
+            $image = $body['image'];
+            if (preg_match('#^data:([a-zA-Z0-9.+-/]+);base64,([A-Za-z0-9+/=\s]+)$#', $image, $m) === 1) {
+                $mime = strtolower($m[1]);
+                $base64 = preg_replace('/\s+/', '', $m[2]) ?? '';
+            } else {
+                throw new BadRequestException('image must be a base64 data URL');
+            }
+        } else {
+            if (isset($body['mime']) && is_string($body['mime'])) {
+                $mime = strtolower(trim($body['mime']));
+            }
+            if (isset($body['data']) && is_string($body['data'])) {
+                $base64 = preg_replace('/\s+/', '', $body['data']) ?? '';
+            }
+        }
+
+        if ($mime === '' || $base64 === '') {
+            throw new BadRequestException('avatar image is required');
+        }
+
+        $allowed = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+        if (!in_array($mime, $allowed, true)) {
+            throw new BadRequestException(
+                'avatar must be one of: ' . implode(', ', $allowed)
+            );
+        }
+
+        // Cap the decoded size at ~256 KiB. base64 inflates by ~4/3,
+        // so the encoded column stays comfortably under 400 KiB.
+        $decoded = base64_decode($base64, true);
+        if ($decoded === false) {
+            throw new BadRequestException('avatar image is not valid base64');
+        }
+        if (strlen($decoded) > 262144) {
+            throw new BadRequestException('avatar image exceeds the 256 KB limit');
+        }
+
+        // Re-encode the decoded bytes so the stored value is free of
+        // whitespace or newline quirks from the client.
+        return [$mime, base64_encode($decoded)];
     }
 
     /**
