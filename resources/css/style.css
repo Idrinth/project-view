@@ -300,15 +300,6 @@ a:hover {
     font-size: 0.875rem;
 }
 
-.footer-nav {
-    margin-bottom: 0.5rem;
-}
-
-.footer-nav a {
-    color: var(--color-text-muted);
-    margin: 0 0.5rem;
-}
-
 .muted {
     color: var(--color-text-subtle);
 }
