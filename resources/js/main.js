@@ -216,6 +216,9 @@
                 text: 'Time spent: ' + formatHours(card.timeSpent) + 'h'
             })
         ]);
+        if (card.id != null) {
+            cardEl.setAttribute('data-card-id', String(card.id));
+        }
         if (draggable) {
             makeDraggable(cardEl);
         }
@@ -249,8 +252,11 @@
 
     function notifyCardMoved(cardEl, originParent) {
         var newParent = cardEl.parentNode;
-        var titleNode = cardEl.querySelector('h4');
-        var title = titleNode ? titleNode.textContent : '';
+        var idAttr = cardEl.getAttribute('data-card-id');
+        if (!idAttr) {
+            // Card has no persistent id yet (e.g. still saving); skip.
+            return;
+        }
         var from = originParent ? originParent.getAttribute('data-column-id') : '';
         var to = newParent.getAttribute('data-column-id') || '';
         var siblings = newParent.querySelectorAll('.kanban-card');
@@ -262,7 +268,7 @@
             }
         }
         apiRequest('POST', 'kanban-move', {
-            title: title,
+            id: Number(idAttr),
             from: from,
             to: to,
             index: index
@@ -381,14 +387,16 @@
             errorNode.textContent = '';
             submitBtn.disabled = true;
             apiRequest('POST', 'kanban-add', payload)
-                .then(function () {
+                .then(function (data) {
+                    var created = (data && data.card) || {};
                     var card = buildCardEl({
-                        title: payload.title,
-                        category: payload.category,
-                        milestone: payload.milestone,
-                        workStarted: null,
-                        workCompleted: null,
-                        timeSpent: 0.0
+                        id: created.id != null ? created.id : null,
+                        title: created.title || payload.title,
+                        category: created.category || payload.category,
+                        milestone: created.milestone != null ? created.milestone : payload.milestone,
+                        workStarted: created.workStarted != null ? created.workStarted : null,
+                        workCompleted: created.workCompleted != null ? created.workCompleted : null,
+                        timeSpent: created.timeSpent != null ? created.timeSpent : 0.0
                     }, true);
                     cardListEl.appendChild(card);
                     closeForm();
