@@ -162,7 +162,7 @@ final class Api
 
     /**
      * Build the kanban board payload. Issues are grouped by status
-     * into the six fixed columns; within each column they are
+     * into the five fixed columns; within each column they are
      * ordered by `position` then id so drag-and-drop ordering is
      * preserved. Each card carries the full breadcrumb of its
      * project ("categoryPath") so the UI can group cards under
@@ -175,12 +175,11 @@ final class Api
     private function kanban(): array
     {
         $columnSpec = [
-            ['id' => Issues::STATUS_TODO,             'title' => 'Todo',                 'discarded' => false],
-            ['id' => Issues::STATUS_IN_PROGRESS,      'title' => 'In Progress',          'discarded' => false],
-            ['id' => Issues::STATUS_WAITING_EXTERNAL, 'title' => 'Waiting for external', 'discarded' => false],
-            ['id' => Issues::STATUS_WAITING_INTERNAL, 'title' => 'Waiting for internal', 'discarded' => false],
-            ['id' => Issues::STATUS_DONE,             'title' => 'Done',                 'discarded' => false],
-            ['id' => Issues::STATUS_DISCARDED,        'title' => 'Discarded',            'discarded' => true],
+            ['id' => Issues::STATUS_TODO,        'title' => 'Todo',        'discarded' => false],
+            ['id' => Issues::STATUS_IN_PROGRESS, 'title' => 'In Progress', 'discarded' => false],
+            ['id' => Issues::STATUS_WAITING,     'title' => 'Waiting',     'discarded' => false],
+            ['id' => Issues::STATUS_DONE,        'title' => 'Done',        'discarded' => false],
+            ['id' => Issues::STATUS_DISCARDED,   'title' => 'Discarded',   'discarded' => true],
         ];
 
         $stmt = $this->db->pdo()->query(

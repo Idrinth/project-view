@@ -153,6 +153,12 @@ a:hover {
     padding: 2rem 1rem;
 }
 
+/* Wider variant for pages that benefit from more horizontal room,
+   like the kanban board whose five columns felt cramped at 1100px. */
+.container-wide {
+    max-width: 1400px;
+}
+
 .site-footer {
     text-align: center;
     padding: 1.5rem;

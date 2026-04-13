@@ -135,6 +135,17 @@ final class Database
             // "no description" in the UI.
             $this->pdo->exec('ALTER TABLE issues ADD COLUMN description TEXT NULL');
         }
+
+        // Collapse the legacy split 'waiting-external' / 'waiting-internal'
+        // statuses into a single 'waiting' status. Older installs have
+        // rows tagged with the old values; the kanban only renders one
+        // "Waiting" column now, and any card whose status is not in
+        // Issues::STATUSES would silently disappear from the board.
+        // Idempotent: the UPDATE is a no-op once every row is migrated.
+        $this->pdo->exec(
+            "UPDATE issues SET status = 'waiting'
+              WHERE status IN ('waiting-external', 'waiting-internal')"
+        );
     }
 
     /**
@@ -321,9 +332,9 @@ final class Database
             "CREATE INDEX IF NOT EXISTS idx_milestones_released_at ON milestones(released_at)",
 
             // issues (aka "tasks" — the cards on the kanban board).
-            // status is one of: todo / in-progress / done / discarded.
-            // position lets the frontend persist drag-and-drop order
-            // within a column.
+            // status is one of: todo / in-progress / waiting / done /
+            // discarded. position lets the frontend persist drag-and-drop
+            // order within a column.
             "CREATE TABLE IF NOT EXISTS issues (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER NOT NULL,

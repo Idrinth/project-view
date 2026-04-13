@@ -6,9 +6,9 @@
  * blocked by `blocked_by_id`. The reverse direction (`blocked_by_id`
  * blocks `issue_id`) is implied - there is only one row per pair.
  *
- * Used by the kanban board's "Waiting for internal" column so a card
- * paused on another task can point at the blocker and show it in the
- * detail view.
+ * Used by the kanban board's "Waiting" column so a card paused on
+ * another task can point at the blocker and show it in the detail
+ * view.
  */
 
 declare(strict_types=1);
