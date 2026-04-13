@@ -529,7 +529,447 @@
         if (draggable) {
             makeDraggable(cardEl);
         }
+        // Clicking a card opens the detail view. Skip the click when
+        // a drag just finished (otherwise dropping onto an empty area
+        // of the same column would pop the modal open unexpectedly).
+        cardEl.addEventListener('click', function (e) {
+            if (cardEl.classList.contains('kanban-card-dragging')) {
+                return;
+            }
+            if (e.defaultPrevented) {
+                return;
+            }
+            if (card.id == null) {
+                return;
+            }
+            openDetailView(card.id, cardEl);
+        });
         return cardEl;
+    }
+
+    // Task detail modal. Shares one overlay (defined in kanban.html)
+    // across every card; each open() replaces its contents.
+    function openDetailView(issueId, cardEl) {
+        var overlay = document.querySelector('[data-detail-overlay]');
+        var body = document.querySelector('[data-detail-body]');
+        if (!overlay || !body) {
+            return;
+        }
+        var closeBtn = document.querySelector('[data-detail-close]');
+        overlay.hidden = false;
+        clear(body);
+        body.appendChild(el('p', { className: 'muted', text: 'Loading\u2026' }));
+
+        function close() {
+            overlay.hidden = true;
+            clear(body);
+            overlay.removeEventListener('click', onOverlayClick);
+            document.removeEventListener('keydown', onKey);
+            if (closeBtn) {
+                closeBtn.removeEventListener('click', close);
+            }
+        }
+        function onOverlayClick(e) {
+            if (e.target === overlay) {
+                close();
+            }
+        }
+        function onKey(e) {
+            if (e.key === 'Escape') {
+                close();
+            }
+        }
+        overlay.addEventListener('click', onOverlayClick);
+        document.addEventListener('keydown', onKey);
+        if (closeBtn) {
+            closeBtn.addEventListener('click', close);
+        }
+
+        apiRequest('POST', 'issue', { id: issueId })
+            .then(function (data) {
+                clear(body);
+                renderDetailView(body, data, cardEl, close);
+            })
+            .catch(function (err) {
+                clear(body);
+                body.appendChild(el('p', {
+                    className: 'detail-error',
+                    text: 'Failed to load task: ' + (err.message || 'unknown error')
+                }));
+            });
+    }
+
+    // Render the three-section detail view (edit form, time entries,
+    // comments) into `container`. `cardEl` is the kanban card the user
+    // clicked to open the view; it is updated in place when an edit
+    // succeeds so the board reflects the change without a full reload.
+    function renderDetailView(container, data, cardEl, close) {
+        var issue = data && data.issue ? data.issue : {};
+        var timeEntries = (data && data.timeEntries) || [];
+        var comments = (data && data.comments) || [];
+
+        container.appendChild(el('h3', { id: 'detail-title', text: issue.title || 'Task' }));
+
+        var editSection = buildEditSection(issue, cardEl);
+        var timeSection = buildTimeSection(issue, timeEntries, cardEl);
+        var commentSection = buildCommentSection(issue, comments);
+
+        container.appendChild(editSection);
+        container.appendChild(timeSection);
+        container.appendChild(commentSection);
+    }
+
+    function buildEditSection(issue, cardEl) {
+        var section = el('section', { className: 'detail-section' });
+        section.appendChild(el('h4', { text: 'Edit' }));
+
+        var form = el('form', { className: 'detail-form' });
+        var titleInput = el('input', {
+            type: 'text',
+            required: 'required',
+            value: issue.title || ''
+        });
+        titleInput.value = issue.title || '';
+        var descriptionInput = el('textarea', { rows: '4' });
+        descriptionInput.value = issue.description || '';
+        var categoryInput = el('input', {
+            type: 'text',
+            placeholder: 'e.g. Mods / Skyrim / Idrinth Thalui'
+        });
+        categoryInput.value = Array.isArray(issue.categoryPath) && issue.categoryPath.length
+            ? issue.categoryPath.join(' / ')
+            : (issue.category || '');
+        var milestoneInput = el('input', { type: 'text', placeholder: 'Milestone (optional)' });
+        milestoneInput.value = issue.milestone || '';
+
+        var statusSelect = el('select');
+        var statusOptions = [
+            { value: 'todo', label: 'Todo' },
+            { value: 'in-progress', label: 'In Progress' },
+            { value: 'done', label: 'Done' },
+            { value: 'discarded', label: 'Discarded' }
+        ];
+        statusOptions.forEach(function (opt) {
+            var o = el('option', { value: opt.value, text: opt.label });
+            if (opt.value === issue.status) {
+                o.setAttribute('selected', 'selected');
+            }
+            statusSelect.appendChild(o);
+        });
+
+        var startedInput = el('input', { type: 'date' });
+        startedInput.value = issue.workStarted || '';
+        var completedInput = el('input', { type: 'date' });
+        completedInput.value = issue.workCompleted || '';
+
+        var submitBtn = el('button', {
+            type: 'submit',
+            className: 'detail-button',
+            text: 'Save'
+        });
+        var statusNode = el('p', { className: 'detail-status' });
+        var errorNode = el('p', { className: 'detail-error', hidden: 'hidden' });
+
+        form.appendChild(field('Title', titleInput, true));
+        form.appendChild(field('Status', statusSelect, false));
+        form.appendChild(field('Category', categoryInput, true));
+        form.appendChild(field('Milestone', milestoneInput, true));
+        form.appendChild(field('Work started', startedInput, false));
+        form.appendChild(field('Work completed', completedInput, false));
+        form.appendChild(field('Description', descriptionInput, true));
+        form.appendChild(el('div', { className: 'detail-actions' }, [submitBtn, statusNode]));
+        form.appendChild(errorNode);
+
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            errorNode.hidden = true;
+            errorNode.textContent = '';
+            submitBtn.disabled = true;
+            statusNode.textContent = 'Saving\u2026';
+            var payload = {
+                id: issue.id,
+                title: titleInput.value.trim(),
+                description: descriptionInput.value.trim(),
+                category: categoryInput.value.trim() || 'Uncategorised',
+                milestone: milestoneInput.value.trim(),
+                status: statusSelect.value,
+                workStarted: startedInput.value,
+                workCompleted: completedInput.value
+            };
+            apiRequest('POST', 'issue-update', payload)
+                .then(function (result) {
+                    submitBtn.disabled = false;
+                    statusNode.textContent = 'Saved.';
+                    var updated = (result && result.issue) || payload;
+                    issue.title = updated.title;
+                    issue.description = updated.description;
+                    issue.category = updated.category;
+                    issue.categoryPath = updated.categoryPath || null;
+                    issue.milestone = updated.milestone;
+                    issue.status = updated.status;
+                    issue.workStarted = updated.workStarted;
+                    issue.workCompleted = updated.workCompleted;
+                    applyCardUpdate(cardEl, issue);
+                })
+                .catch(function (err) {
+                    submitBtn.disabled = false;
+                    statusNode.textContent = '';
+                    errorNode.textContent = err.message || 'Failed to save';
+                    errorNode.hidden = false;
+                });
+        });
+
+        section.appendChild(form);
+        return section;
+    }
+
+    function buildTimeSection(issue, entries, cardEl) {
+        var section = el('section', { className: 'detail-section' });
+        section.appendChild(el('h4', { text: 'Time spent' }));
+
+        var listWrap = el('div');
+        renderTimeEntries(listWrap, entries);
+        section.appendChild(listWrap);
+
+        var form = el('form', { className: 'detail-form' });
+        var dateInput = el('input', { type: 'date', required: 'required' });
+        dateInput.value = new Date().toISOString().slice(0, 10);
+        var hoursInput = el('input', {
+            type: 'number',
+            step: '0.25',
+            min: '0',
+            required: 'required',
+            placeholder: '1.5'
+        });
+        var categoryInput = el('input', {
+            type: 'text',
+            placeholder: 'Category (e.g. Development)'
+        });
+        var noteInput = el('textarea', { rows: '2', placeholder: 'Note (optional)' });
+        var submitBtn = el('button', {
+            type: 'submit',
+            className: 'detail-button',
+            text: 'Log time'
+        });
+        var statusNode = el('p', { className: 'detail-status' });
+        var errorNode = el('p', { className: 'detail-error', hidden: 'hidden' });
+
+        form.appendChild(field('Date', dateInput, false));
+        form.appendChild(field('Hours', hoursInput, false));
+        form.appendChild(field('Category', categoryInput, true));
+        form.appendChild(field('Note', noteInput, true));
+        form.appendChild(el('div', { className: 'detail-actions' }, [submitBtn, statusNode]));
+        form.appendChild(errorNode);
+
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            errorNode.hidden = true;
+            errorNode.textContent = '';
+            var hours = parseFloat(hoursInput.value);
+            if (!isFinite(hours) || hours <= 0) {
+                errorNode.textContent = 'Hours must be greater than zero';
+                errorNode.hidden = false;
+                return;
+            }
+            submitBtn.disabled = true;
+            statusNode.textContent = 'Saving\u2026';
+            var payload = {
+                id: issue.id,
+                spentOn: dateInput.value,
+                hours: hours,
+                category: categoryInput.value.trim(),
+                note: noteInput.value.trim()
+            };
+            apiRequest('POST', 'issue-time-add', payload)
+                .then(function (result) {
+                    submitBtn.disabled = false;
+                    statusNode.textContent = 'Logged.';
+                    var entry = (result && result.entry) || payload;
+                    entries.unshift({
+                        id: entry.id,
+                        spentOn: entry.spentOn,
+                        hours: entry.hours,
+                        category: entry.category || '',
+                        note: entry.note || ''
+                    });
+                    renderTimeEntries(listWrap, entries);
+                    hoursInput.value = '';
+                    categoryInput.value = '';
+                    noteInput.value = '';
+                    var total = result && typeof result.timeSpent === 'number'
+                        ? result.timeSpent
+                        : null;
+                    if (total != null) {
+                        issue.timeSpent = total;
+                        updateCardTimeSpent(cardEl, total);
+                    }
+                })
+                .catch(function (err) {
+                    submitBtn.disabled = false;
+                    statusNode.textContent = '';
+                    errorNode.textContent = err.message || 'Failed to log time';
+                    errorNode.hidden = false;
+                });
+        });
+
+        section.appendChild(form);
+        return section;
+    }
+
+    function renderTimeEntries(wrap, entries) {
+        clear(wrap);
+        if (!entries.length) {
+            wrap.appendChild(el('p', { className: 'detail-empty', text: 'No time logged yet.' }));
+            return;
+        }
+        var list = el('ul', { className: 'detail-entries' });
+        entries.forEach(function (entry) {
+            var meta = entry.spentOn + ' \u00b7 ' + formatHours(entry.hours) + 'h';
+            if (entry.category) {
+                meta += ' \u00b7 ' + entry.category;
+            }
+            var children = [el('p', { className: 'detail-entry-meta', text: meta })];
+            if (entry.note) {
+                children.push(el('p', { className: 'detail-entry-note', text: entry.note }));
+            }
+            list.appendChild(el('li', { className: 'detail-entry' }, children));
+        });
+        wrap.appendChild(list);
+    }
+
+    function buildCommentSection(issue, comments) {
+        var section = el('section', { className: 'detail-section' });
+        section.appendChild(el('h4', { text: 'Comments' }));
+
+        var listWrap = el('div');
+        renderComments(listWrap, comments);
+        section.appendChild(listWrap);
+
+        var form = el('form', { className: 'detail-form' });
+        var bodyInput = el('textarea', {
+            rows: '3',
+            required: 'required',
+            placeholder: 'Leave a comment\u2026'
+        });
+        var submitBtn = el('button', {
+            type: 'submit',
+            className: 'detail-button',
+            text: 'Post comment'
+        });
+        var statusNode = el('p', { className: 'detail-status' });
+        var errorNode = el('p', { className: 'detail-error', hidden: 'hidden' });
+
+        form.appendChild(field('Comment', bodyInput, true));
+        form.appendChild(el('div', { className: 'detail-actions' }, [submitBtn, statusNode]));
+        form.appendChild(errorNode);
+
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            errorNode.hidden = true;
+            errorNode.textContent = '';
+            var text = bodyInput.value.trim();
+            if (!text) {
+                return;
+            }
+            submitBtn.disabled = true;
+            statusNode.textContent = 'Posting\u2026';
+            apiRequest('POST', 'issue-comment-add', { id: issue.id, body: text })
+                .then(function (result) {
+                    submitBtn.disabled = false;
+                    statusNode.textContent = 'Posted.';
+                    var c = (result && result.comment) || {
+                        author: '',
+                        body: text,
+                        createdAt: new Date().toISOString()
+                    };
+                    comments.push(c);
+                    renderComments(listWrap, comments);
+                    bodyInput.value = '';
+                })
+                .catch(function (err) {
+                    submitBtn.disabled = false;
+                    statusNode.textContent = '';
+                    errorNode.textContent = err.message || 'Failed to post comment';
+                    errorNode.hidden = false;
+                });
+        });
+
+        section.appendChild(form);
+        return section;
+    }
+
+    function renderComments(wrap, comments) {
+        clear(wrap);
+        if (!comments.length) {
+            wrap.appendChild(el('p', { className: 'detail-empty', text: 'No comments yet.' }));
+            return;
+        }
+        var list = el('ul', { className: 'detail-comments' });
+        comments.forEach(function (c) {
+            list.appendChild(el('li', { className: 'detail-comment' }, [
+                el('p', {
+                    className: 'detail-comment-meta',
+                    text: (c.author || 'unknown') + ' \u00b7 ' + (c.createdAt || '')
+                }),
+                el('p', { className: 'detail-comment-body', text: c.body || '' })
+            ]));
+        });
+        wrap.appendChild(list);
+    }
+
+    function field(labelText, input, full) {
+        var label = el('label', { className: 'detail-field' + (full ? ' detail-field-full' : '') });
+        label.appendChild(el('span', { text: labelText }));
+        label.appendChild(input);
+        return label;
+    }
+
+    // Update the visible kanban card after an edit. Rebuilds the card
+    // in place so breadcrumbs, milestone and work dates all reflect
+    // the new state. If the status changed the card is moved to the
+    // bottom of the matching column.
+    function applyCardUpdate(cardEl, issue) {
+        if (!cardEl || !cardEl.parentNode) {
+            return;
+        }
+        var parent = cardEl.parentNode;
+        var currentStatus = parent.getAttribute('data-column-id') || '';
+        var targetParent = parent;
+        if (issue.status && issue.status !== currentStatus) {
+            var candidate = document.querySelector('[data-column-id="' + issue.status + '"]');
+            if (candidate) {
+                targetParent = candidate;
+            }
+        }
+        var draggable = cardEl.getAttribute('draggable') === 'true';
+        var card = {
+            id: issue.id,
+            title: issue.title,
+            description: issue.description,
+            category: issue.category,
+            categoryPath: issue.categoryPath,
+            milestone: issue.milestone,
+            workStarted: issue.workStarted,
+            workCompleted: issue.workCompleted,
+            timeSpent: issue.timeSpent != null ? issue.timeSpent : 0
+        };
+        var replacement = buildCardEl(card, draggable);
+        targetParent.appendChild(replacement);
+        if (cardEl !== replacement) {
+            cardEl.parentNode.removeChild(cardEl);
+        }
+    }
+
+    // In-place update of a kanban card's "Time spent" line so the
+    // board reflects a newly logged entry without a full rebuild.
+    function updateCardTimeSpent(cardEl, totalHours) {
+        if (!cardEl) {
+            return;
+        }
+        var node = cardEl.querySelector('.kanban-time');
+        if (node) {
+            node.textContent = 'Time spent: ' + formatHours(totalHours) + 'h';
+        }
     }
 
     function makeDraggable(cardEl) {
