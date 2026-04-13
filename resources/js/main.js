@@ -57,6 +57,14 @@
         var filterInput = document.querySelector('[data-category-filter]');
         var clearBtn = document.querySelector('[data-category-filter-clear]');
 
+        // Seed the shared category datalist from the loaded data so
+        // both the filter input and the add-card form get suggestions
+        // for every category (and prefix) currently in use.
+        ensureCategoryDatalist(collectCategoryPaths(view, data));
+        if (filterInput) {
+            filterInput.setAttribute('list', CATEGORY_DATALIST_ID);
+        }
+
         function render() {
             var filter = filterInput ? parseCategoryFilter(filterInput.value) : [];
             var viewData = applyCategoryFilter(view, data, filter);
@@ -77,6 +85,85 @@
         }
 
         render();
+    }
+
+    // Shared id used by both the filter input and the kanban add-card
+    // category input so a single <datalist> feeds every autocomplete.
+    var CATEGORY_DATALIST_ID = 'category-suggestions';
+
+    // Collect every distinct category path visible in the current
+    // payload, plus all prefix paths, so users can pick any level of
+    // the hierarchy (e.g. "Mods", "Mods / Skyrim", "Mods / Skyrim /
+    // Idrinth Thalui") without having to remember the leaf name.
+    function collectCategoryPaths(view, data) {
+        var seen = {};
+        var paths = [];
+        var push = function (path) {
+            if (!Array.isArray(path) || path.length === 0) {
+                return;
+            }
+            for (var i = 1; i <= path.length; i++) {
+                var label = path.slice(0, i).join(' / ');
+                var key = label.toLowerCase();
+                if (label && !seen[key]) {
+                    seen[key] = true;
+                    paths.push(label);
+                }
+            }
+        };
+        if (view === 'kanban' && data && Array.isArray(data.columns)) {
+            data.columns.forEach(function (column) {
+                (column.cards || []).forEach(function (card) {
+                    push(cardCategoryPath(card));
+                });
+            });
+        } else if (view === 'releases' && data && Array.isArray(data.projects)) {
+            data.projects.forEach(function (project) {
+                push(projectCategoryPath(project));
+            });
+        }
+        paths.sort(function (a, b) { return a.localeCompare(b); });
+        return paths;
+    }
+
+    // Create (or refresh) a <datalist> holding the supplied category
+    // paths. Inputs reference it via the `list` attribute.
+    function ensureCategoryDatalist(paths) {
+        var list = document.getElementById(CATEGORY_DATALIST_ID);
+        if (!list) {
+            list = document.createElement('datalist');
+            list.id = CATEGORY_DATALIST_ID;
+            document.body.appendChild(list);
+        }
+        clear(list);
+        paths.forEach(function (label) {
+            var option = document.createElement('option');
+            option.value = label;
+            list.appendChild(option);
+        });
+        return list;
+    }
+
+    // Merge a freshly-added category path into the shared datalist so
+    // suggestions stay current without needing a page reload.
+    function addCategoryPathToDatalist(path) {
+        var list = document.getElementById(CATEGORY_DATALIST_ID);
+        if (!list || !Array.isArray(path) || path.length === 0) {
+            return;
+        }
+        var existing = {};
+        for (var i = 0; i < list.options.length; i++) {
+            existing[list.options[i].value.toLowerCase()] = true;
+        }
+        for (var j = 1; j <= path.length; j++) {
+            var label = path.slice(0, j).join(' / ');
+            if (label && !existing[label.toLowerCase()]) {
+                existing[label.toLowerCase()] = true;
+                var option = document.createElement('option');
+                option.value = label;
+                list.appendChild(option);
+            }
+        }
     }
 
     // Split a user-typed path like "Mods / Skyrim" into trimmed,
@@ -555,7 +642,8 @@
         var categoryInput = el('input', {
             type: 'text',
             placeholder: 'Category (e.g. Mods / Skyrim / Idrinth Thalui)',
-            className: 'kanban-add-input'
+            className: 'kanban-add-input',
+            list: CATEGORY_DATALIST_ID
         });
         var milestoneInput = el('input', {
             type: 'text',
@@ -616,7 +704,7 @@
             apiRequest('POST', 'kanban-add', payload)
                 .then(function (data) {
                     var created = (data && data.card) || {};
-                    var card = buildCardEl({
+                    var cardData = {
                         id: created.id != null ? created.id : null,
                         title: created.title || payload.title,
                         description: typeof created.description === 'string' ? created.description : payload.description,
@@ -626,8 +714,10 @@
                         workStarted: created.workStarted != null ? created.workStarted : null,
                         workCompleted: created.workCompleted != null ? created.workCompleted : null,
                         timeSpent: created.timeSpent != null ? created.timeSpent : 0.0
-                    }, true);
+                    };
+                    var card = buildCardEl(cardData, true);
                     cardListEl.appendChild(card);
+                    addCategoryPathToDatalist(cardCategoryPath(cardData));
                     closeForm();
                 })
                 .catch(function (err) {
