@@ -899,6 +899,35 @@ body.kanban-modal-open {
     color: #52606d;
 }
 
+.release-issues {
+    list-style: none;
+    margin: 0.5rem 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.release-issue {
+    font-size: 0.85rem;
+    line-height: 1.3;
+}
+
+.release-issue-link {
+    color: #2563eb;
+    text-decoration: none;
+}
+
+.release-issue-link:hover,
+.release-issue-link:focus {
+    text-decoration: underline;
+}
+
+.release-issue-discarded .release-issue-link {
+    color: #9aa5b1;
+    text-decoration: line-through;
+}
+
 /* Time table */
 .table-wrap {
     overflow-x: auto;
