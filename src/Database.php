@@ -301,6 +301,24 @@ final class Database
                 FOREIGN KEY (issue_id) REFERENCES issues(id) ON DELETE CASCADE
             )",
             "CREATE INDEX IF NOT EXISTS idx_comments_issue ON comments(issue_id)",
+
+            // Issue dependency links. Each row says `issue_id` is
+            // blocked by `blocked_by_id`. The inverse direction
+            // (`blocked_by_id` blocks `issue_id`) is implied by the
+            // same row. Pairs are unique; self-links are rejected at
+            // the API layer. Deleting either endpoint cascades so
+            // links never outlive the issues they connect.
+            "CREATE TABLE IF NOT EXISTS issue_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                issue_id INTEGER NOT NULL,
+                blocked_by_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE (issue_id, blocked_by_id),
+                FOREIGN KEY (issue_id) REFERENCES issues(id) ON DELETE CASCADE,
+                FOREIGN KEY (blocked_by_id) REFERENCES issues(id) ON DELETE CASCADE
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_issue_links_issue ON issue_links(issue_id)",
+            "CREATE INDEX IF NOT EXISTS idx_issue_links_blocker ON issue_links(blocked_by_id)",
         ];
     }
 }

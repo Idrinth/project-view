@@ -17,6 +17,7 @@ require_once __DIR__ . '/Database.php';
 require_once __DIR__ . '/Projects.php';
 require_once __DIR__ . '/Milestones.php';
 require_once __DIR__ . '/Issues.php';
+require_once __DIR__ . '/IssueLinks.php';
 require_once __DIR__ . '/TimeEntries.php';
 require_once __DIR__ . '/TimeAggregates.php';
 require_once __DIR__ . '/Comments.php';
@@ -28,6 +29,7 @@ final class Api
     private Projects $projects;
     private Milestones $milestones;
     private Issues $issues;
+    private IssueLinks $issueLinks;
     private TimeEntries $timeEntries;
     private TimeAggregates $timeAggregates;
     private Comments $comments;
@@ -39,6 +41,7 @@ final class Api
         $this->projects = new Projects($this->db);
         $this->milestones = new Milestones($this->db);
         $this->issues = new Issues($this->db);
+        $this->issueLinks = new IssueLinks($this->db);
         $this->timeEntries = new TimeEntries($this->db);
         $this->timeAggregates = new TimeAggregates($this->db);
         $this->comments = new Comments($this->db);
@@ -76,6 +79,10 @@ final class Api
                 return $this->issueTimeAdd($method, $body);
             case 'issue-comment-add':
                 return $this->issueCommentAdd($method, $body);
+            case 'issue-link-add':
+                return $this->issueLinkAdd($method, $body);
+            case 'issue-link-remove':
+                return $this->issueLinkRemove($method, $body);
             case 'releases':
                 return $this->releases();
             case 'time':
@@ -155,7 +162,7 @@ final class Api
 
     /**
      * Build the kanban board payload. Issues are grouped by status
-     * into the four fixed columns; within each column they are
+     * into the six fixed columns; within each column they are
      * ordered by `position` then id so drag-and-drop ordering is
      * preserved. Each card carries the full breadcrumb of its
      * project ("categoryPath") so the UI can group cards under
@@ -168,10 +175,12 @@ final class Api
     private function kanban(): array
     {
         $columnSpec = [
-            ['id' => Issues::STATUS_TODO,        'title' => 'Todo',        'discarded' => false],
-            ['id' => Issues::STATUS_IN_PROGRESS, 'title' => 'In Progress', 'discarded' => false],
-            ['id' => Issues::STATUS_DONE,        'title' => 'Done',        'discarded' => false],
-            ['id' => Issues::STATUS_DISCARDED,   'title' => 'Discarded',   'discarded' => true],
+            ['id' => Issues::STATUS_TODO,             'title' => 'Todo',                 'discarded' => false],
+            ['id' => Issues::STATUS_IN_PROGRESS,      'title' => 'In Progress',          'discarded' => false],
+            ['id' => Issues::STATUS_WAITING_EXTERNAL, 'title' => 'Waiting for external', 'discarded' => false],
+            ['id' => Issues::STATUS_WAITING_INTERNAL, 'title' => 'Waiting for internal', 'discarded' => false],
+            ['id' => Issues::STATUS_DONE,             'title' => 'Done',                 'discarded' => false],
+            ['id' => Issues::STATUS_DISCARDED,        'title' => 'Discarded',            'discarded' => true],
         ];
 
         $stmt = $this->db->pdo()->query(
@@ -470,6 +479,13 @@ final class Api
             ];
         }
 
+        // Pre-resolve project breadcrumbs once for both link
+        // directions so a heavily linked card does not repeat the
+        // pathFor() lookup per row.
+        $allPaths = $this->projects->allPaths();
+        $blockedBy = $this->mapLinkedIssues($this->issueLinks->blockedBy($id), $allPaths);
+        $blocks    = $this->mapLinkedIssues($this->issueLinks->blocks($id), $allPaths);
+
         return [
             'issue' => [
                 'id'            => $id,
@@ -485,7 +501,36 @@ final class Api
             ],
             'timeEntries' => $entries,
             'comments'    => $comments,
+            'blockedBy'   => $blockedBy,
+            'blocks'      => $blocks,
         ];
+    }
+
+    /**
+     * Format a list of issue rows returned by IssueLinks for the
+     * detail view. Each entry carries the link id so the frontend can
+     * delete it without a second round trip.
+     *
+     * @param list<array<string, mixed>>          $rows
+     * @param array<int, list<string>>            $paths
+     * @return list<array<string, mixed>>
+     */
+    private function mapLinkedIssues(array $rows, array $paths): array
+    {
+        $out = [];
+        foreach ($rows as $row) {
+            $projectId = (int) $row['project_id'];
+            $path = $paths[$projectId] ?? [];
+            $out[] = [
+                'linkId'       => (int) $row['link_id'],
+                'id'           => (int) $row['id'],
+                'title'        => (string) $row['title'],
+                'status'       => (string) $row['status'],
+                'category'     => implode(self::CATEGORY_PATH_SEPARATOR, $path),
+                'categoryPath' => $path,
+            ];
+        }
+        return $out;
     }
 
     /**
@@ -683,6 +728,94 @@ final class Api
                 'createdAt' => gmdate('c'),
             ],
         ];
+    }
+
+    /**
+     * Record that issue `id` is blocked by issue `blockedBy`. The
+     * inverse direction (`blockedBy` blocks `id`) is implied by the
+     * same row. Rejects self-links, duplicates (in either direction)
+     * and additions that would close a cycle in the dependency
+     * graph.
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private function issueLinkAdd(string $method, array $body): array
+    {
+        if ($method !== 'POST') {
+            throw new BadRequestException('issue-link-add requires POST');
+        }
+        $this->requireUser();
+
+        $id = $this->readId($body);
+        $blockedById = isset($body['blockedBy']) && (is_int($body['blockedBy']) || (is_string($body['blockedBy']) && ctype_digit($body['blockedBy'])))
+            ? (int) $body['blockedBy']
+            : 0;
+        if ($blockedById <= 0) {
+            throw new BadRequestException('blockedBy is required');
+        }
+        if ($id === $blockedById) {
+            throw new BadRequestException('an issue cannot block itself');
+        }
+        if ($this->issues->find($id) === null) {
+            throw new BadRequestException('unknown issue');
+        }
+        if ($this->issues->find($blockedById) === null) {
+            throw new BadRequestException('unknown blocker');
+        }
+        if ($this->issueLinks->exists($id, $blockedById)) {
+            throw new BadRequestException('these issues are already linked');
+        }
+        // Cycle check: if the proposed blocker is already (transitively)
+        // blocked by `id`, adding `id blocked by blockedById` would
+        // close a loop. We walk the "is blocked by" graph from the
+        // blocker and refuse if we hit `id`.
+        $reachable = $this->issueLinks->ancestors($blockedById);
+        if (isset($reachable[$id])) {
+            throw new BadRequestException('that link would create a cycle');
+        }
+
+        $linkId = $this->issueLinks->add($id, $blockedById);
+        $blocker = $this->issues->find($blockedById);
+        $projectId = (int) $blocker['project_id'];
+        $path = $this->projects->pathFor($projectId);
+
+        return [
+            'ok'   => true,
+            'link' => [
+                'linkId'       => $linkId,
+                'id'           => $blockedById,
+                'title'        => (string) $blocker['title'],
+                'status'       => (string) $blocker['status'],
+                'category'     => implode(self::CATEGORY_PATH_SEPARATOR, $path),
+                'categoryPath' => $path,
+            ],
+        ];
+    }
+
+    /**
+     * Remove a single dependency link by its id. Either endpoint of
+     * the link can trigger removal; the row is the same regardless
+     * of which side the user opened the detail view for.
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private function issueLinkRemove(string $method, array $body): array
+    {
+        if ($method !== 'POST') {
+            throw new BadRequestException('issue-link-remove requires POST');
+        }
+        $this->requireUser();
+
+        $linkId = isset($body['linkId']) && (is_int($body['linkId']) || (is_string($body['linkId']) && ctype_digit($body['linkId'])))
+            ? (int) $body['linkId']
+            : 0;
+        if ($linkId <= 0) {
+            throw new BadRequestException('linkId is required');
+        }
+        $this->issueLinks->delete($linkId);
+        return ['ok' => true];
     }
 
     /**
