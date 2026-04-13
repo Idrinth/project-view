@@ -7,8 +7,21 @@
     var API_URL = 'index.php';
 
     document.addEventListener('DOMContentLoaded', function () {
-        renderUserMenu();
         bindLoginForm();
+
+        // Fetch the current user once and share the result between the
+        // nav user-menu and the view renderer. The promise never
+        // rejects - it resolves to null when the caller isn't signed in
+        // so callers can treat the value as a simple boolean.
+        var userPromise = apiRequest('GET', 'me')
+            .then(function (data) {
+                return (data && data.user && data.user.name) || null;
+            })
+            .catch(function () {
+                return null;
+            });
+
+        userPromise.then(renderUserMenu);
 
         var container = document.querySelector('[data-view]');
         if (!container) {
@@ -19,10 +32,10 @@
         if (!renderer) {
             return;
         }
-        fetchEndpoint(view)
-            .then(function (data) {
+        Promise.all([fetchEndpoint(view), userPromise])
+            .then(function (results) {
                 clear(container);
-                renderer(container, data);
+                renderer(container, results[0], { user: results[1] });
             })
             .catch(function (err) {
                 clear(container);
@@ -33,21 +46,17 @@
             });
     });
 
-    // Ask the API who (if anyone) the current request is authenticated
-    // as and populate the nav user-menu slot accordingly.
-    function renderUserMenu() {
+    // Populate the nav user-menu slot based on the resolved auth state.
+    function renderUserMenu(name) {
         var slot = document.querySelector('[data-user-menu]');
         if (!slot) {
             return;
         }
-        apiRequest('GET', 'me')
-            .then(function (data) {
-                var name = (data && data.user && data.user.name) || '';
-                renderSignedIn(slot, name);
-            })
-            .catch(function () {
-                renderSignedOut(slot);
-            });
+        if (name) {
+            renderSignedIn(slot, name);
+        } else {
+            renderSignedOut(slot);
+        }
     }
 
     function renderSignedIn(slot, name) {
@@ -192,8 +201,10 @@
     }
 
     var draggedCard = null;
+    var draggedOriginParent = null;
+    var draggedOriginNext = null;
 
-    function buildCardEl(card) {
+    function buildCardEl(card, draggable) {
         var cardEl = el('article', { className: 'kanban-card' }, [
             el('h4', { text: card.title }),
             el('p', { className: 'kanban-meta', text: 'Category: ' + card.category }),
@@ -205,7 +216,9 @@
                 text: 'Time spent: ' + formatHours(card.timeSpent) + 'h'
             })
         ]);
-        makeDraggable(cardEl);
+        if (draggable) {
+            makeDraggable(cardEl);
+        }
         return cardEl;
     }
 
@@ -213,6 +226,8 @@
         cardEl.setAttribute('draggable', 'true');
         cardEl.addEventListener('dragstart', function (e) {
             draggedCard = cardEl;
+            draggedOriginParent = cardEl.parentNode;
+            draggedOriginNext = cardEl.nextSibling;
             cardEl.classList.add('kanban-card-dragging');
             if (e.dataTransfer) {
                 e.dataTransfer.effectAllowed = 'move';
@@ -221,7 +236,40 @@
         });
         cardEl.addEventListener('dragend', function () {
             cardEl.classList.remove('kanban-card-dragging');
+            var movedParent = cardEl.parentNode !== draggedOriginParent;
+            var movedIndex = cardEl.nextSibling !== draggedOriginNext;
+            if (cardEl.parentNode && (movedParent || movedIndex)) {
+                notifyCardMoved(cardEl, draggedOriginParent);
+            }
             draggedCard = null;
+            draggedOriginParent = null;
+            draggedOriginNext = null;
+        });
+    }
+
+    function notifyCardMoved(cardEl, originParent) {
+        var newParent = cardEl.parentNode;
+        var titleNode = cardEl.querySelector('h4');
+        var title = titleNode ? titleNode.textContent : '';
+        var from = originParent ? originParent.getAttribute('data-column-id') : '';
+        var to = newParent.getAttribute('data-column-id') || '';
+        var siblings = newParent.querySelectorAll('.kanban-card');
+        var index = 0;
+        for (var i = 0; i < siblings.length; i++) {
+            if (siblings[i] === cardEl) {
+                index = i;
+                break;
+            }
+        }
+        apiRequest('POST', 'kanban-move', {
+            title: title,
+            from: from,
+            to: to,
+            index: index
+        }).catch(function (err) {
+            if (window.console) {
+                window.console.warn('kanban-move failed: ' + err.message);
+            }
         });
     }
 
@@ -259,7 +307,7 @@
         });
     }
 
-    function buildAddCardUi(cardListEl) {
+    function buildAddCardUi(cardListEl, columnId) {
         var wrap = el('div', { className: 'kanban-add' });
         var button = el('button', {
             type: 'button',
@@ -293,10 +341,12 @@
             className: 'kanban-add-cancel',
             text: 'Cancel'
         });
+        var errorNode = el('p', { className: 'kanban-add-error', hidden: 'hidden' });
         var actions = el('div', { className: 'kanban-add-actions' }, [submitBtn, cancelBtn]);
         form.appendChild(titleInput);
         form.appendChild(categoryInput);
         form.appendChild(milestoneInput);
+        form.appendChild(errorNode);
         form.appendChild(actions);
 
         function openForm() {
@@ -308,6 +358,9 @@
             form.reset();
             form.hidden = true;
             button.hidden = false;
+            errorNode.hidden = true;
+            errorNode.textContent = '';
+            submitBtn.disabled = false;
         }
 
         button.addEventListener('click', openForm);
@@ -318,16 +371,33 @@
             if (!title) {
                 return;
             }
-            var card = buildCardEl({
+            var payload = {
+                column: columnId,
                 title: title,
                 category: categoryInput.value.trim() || 'Uncategorised',
-                milestone: milestoneInput.value.trim() || null,
-                workStarted: null,
-                workCompleted: null,
-                timeSpent: 0.0
-            });
-            cardListEl.appendChild(card);
-            closeForm();
+                milestone: milestoneInput.value.trim() || null
+            };
+            errorNode.hidden = true;
+            errorNode.textContent = '';
+            submitBtn.disabled = true;
+            apiRequest('POST', 'kanban-add', payload)
+                .then(function () {
+                    var card = buildCardEl({
+                        title: payload.title,
+                        category: payload.category,
+                        milestone: payload.milestone,
+                        workStarted: null,
+                        workCompleted: null,
+                        timeSpent: 0.0
+                    }, true);
+                    cardListEl.appendChild(card);
+                    closeForm();
+                })
+                .catch(function (err) {
+                    submitBtn.disabled = false;
+                    errorNode.textContent = err.message || 'Failed to add card';
+                    errorNode.hidden = false;
+                });
         });
 
         wrap.appendChild(button);
@@ -336,7 +406,8 @@
     }
 
     var renderers = {
-        kanban: function (container, data) {
+        kanban: function (container, data, options) {
+            var canEdit = !!(options && options.user);
             var columns = (data && data.columns) || [];
             columns.forEach(function (column) {
                 var section = el('section', {
@@ -345,12 +416,17 @@
                 section.appendChild(el('h3', { className: 'kanban-title', text: column.title }));
 
                 var cardList = el('div', { className: 'kanban-cards' });
+                cardList.setAttribute('data-column-id', column.id);
                 (column.cards || []).forEach(function (card) {
-                    cardList.appendChild(buildCardEl(card));
+                    cardList.appendChild(buildCardEl(card, canEdit));
                 });
-                makeDropTarget(cardList);
+                if (canEdit) {
+                    makeDropTarget(cardList);
+                }
                 section.appendChild(cardList);
-                section.appendChild(buildAddCardUi(cardList));
+                if (canEdit) {
+                    section.appendChild(buildAddCardUi(cardList, column.id));
+                }
 
                 container.appendChild(section);
             });
