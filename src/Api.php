@@ -472,6 +472,14 @@ final class Api
                 'hours'    => (float) $row['hours'],
                 'category' => (string) $row['category'],
                 'note'     => $row['note'] !== null ? (string) $row['note'] : '',
+                'userId'   => (int) $row['user_id'],
+                // username comes from the LEFT JOIN in
+                // TimeEntries::forIssue and is NULL if the author was
+                // since deleted; fall back to the empty string so the
+                // frontend can decide how to render the gap.
+                'userName' => isset($row['username']) && $row['username'] !== null
+                    ? (string) $row['username']
+                    : '',
             ];
         }
 
@@ -654,6 +662,10 @@ final class Api
      * Record a time entry against an issue. Refreshes the aggregate
      * cache so the kanban board's per-card "time spent" stays in sync.
      *
+     * The entry is attributed to the signed-in user; callers cannot
+     * forge a different author. Legacy rows that predate the column
+     * are backfilled to user-id 1 by the schema migration.
+     *
      * @param array<string, mixed> $body
      * @return array<string, mixed>
      */
@@ -663,6 +675,11 @@ final class Api
             throw new BadRequestException('issue-time-add requires POST');
         }
         $this->requireUser();
+        // requireUser() guarantees a session, so currentUserId() is
+        // never null here; fall back to 1 only as a defensive default
+        // matching the schema's column default.
+        $userId   = $this->auth->currentUserId() ?? 1;
+        $userName = $this->auth->currentUser() ?? '';
 
         $id = $this->readId($body);
         $issue = $this->issues->find($id);
@@ -687,7 +704,8 @@ final class Api
             $spentOn,
             $hours,
             $category,
-            $note !== '' ? $note : null
+            $note !== '' ? $note : null,
+            $userId
         );
 
         $this->timeAggregates->refreshIssue($id);
@@ -712,6 +730,8 @@ final class Api
                 'hours'    => $hours,
                 'category' => $category,
                 'note'     => $note,
+                'userId'   => $userId,
+                'userName' => $userName,
             ],
             'timeSpent' => $agg !== null ? (float) $agg['hours'] : 0.0,
         ];

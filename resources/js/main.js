@@ -1207,7 +1207,9 @@
                         spentOn: entry.spentOn,
                         hours: entry.hours,
                         category: entry.category || '',
-                        note: entry.note || ''
+                        note: entry.note || '',
+                        userId: entry.userId != null ? entry.userId : null,
+                        userName: entry.userName || ''
                     });
                     renderTimeEntries(listWrap, entries);
                     hoursInput.value = '';
@@ -1244,6 +1246,13 @@
             var meta = entry.spentOn + ' \u00b7 ' + formatHours(entry.hours) + 'h';
             if (entry.category) {
                 meta += ' \u00b7 ' + entry.category;
+            }
+            // Attribution: prefer the username, but fall back to the
+            // raw user id so legacy rows backfilled with the bootstrap
+            // user are still visibly tagged.
+            var who = entry.userName || (entry.userId != null ? '#' + entry.userId : '');
+            if (who) {
+                meta += ' \u00b7 ' + who;
             }
             var children = [el('p', { className: 'detail-entry-meta', text: meta })];
             if (entry.note) {

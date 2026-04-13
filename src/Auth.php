@@ -107,6 +107,39 @@ final class Auth
      */
     public function currentUser(): ?string
     {
+        $row = $this->currentUserRow();
+        if ($row === null) {
+            return null;
+        }
+        $username = $row['username'] ?? null;
+        return is_string($username) && $username !== '' ? $username : null;
+    }
+
+    /**
+     * Return the numeric id of the authenticated user, or null when no
+     * valid session is present. Useful for callers that need to stamp
+     * a foreign key (e.g. time entry attribution) rather than display
+     * a username.
+     */
+    public function currentUserId(): ?int
+    {
+        $row = $this->currentUserRow();
+        if ($row === null || !isset($row['id'])) {
+            return null;
+        }
+        return (int) $row['id'];
+    }
+
+    /**
+     * Resolve the cookie to the matching row in the users table. Both
+     * currentUser() and currentUserId() build on this so the JWT is
+     * verified once per request and the user lookup never disagrees
+     * with itself.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function currentUserRow(): ?array
+    {
         $name = $this->cookieName();
         if (!isset($_COOKIE[$name]) || !is_string($_COOKIE[$name])) {
             return null;
@@ -121,10 +154,7 @@ final class Auth
         }
         // Guard against users that were removed from the database
         // after their token was issued.
-        if ($this->users->findByUsername($sub) === null) {
-            return null;
-        }
-        return $sub;
+        return $this->users->findByUsername($sub);
     }
 
     /**
