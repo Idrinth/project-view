@@ -7,6 +7,9 @@
     var API_URL = 'index.php';
 
     document.addEventListener('DOMContentLoaded', function () {
+        renderUserMenu();
+        bindLoginForm();
+
         var container = document.querySelector('[data-view]');
         if (!container) {
             return;
@@ -30,15 +33,116 @@
             });
     });
 
-    function fetchEndpoint(name) {
-        return fetch(API_URL + '?endpoint=' + encodeURIComponent(name), {
-            headers: { 'Accept': 'application/json' }
-        }).then(function (response) {
-            if (!response.ok) {
-                throw new Error('HTTP ' + response.status);
-            }
-            return response.json();
+    // Ask the API who (if anyone) the current request is authenticated
+    // as and populate the nav user-menu slot accordingly.
+    function renderUserMenu() {
+        var slot = document.querySelector('[data-user-menu]');
+        if (!slot) {
+            return;
+        }
+        apiRequest('GET', 'me')
+            .then(function (data) {
+                var name = (data && data.user && data.user.name) || '';
+                renderSignedIn(slot, name);
+            })
+            .catch(function () {
+                renderSignedOut(slot);
+            });
+    }
+
+    function renderSignedIn(slot, name) {
+        clear(slot);
+        slot.appendChild(el('span', { className: 'user-menu-name', text: name }));
+        var button = el('button', { className: 'user-menu-logout', type: 'button', text: 'Sign out' });
+        button.addEventListener('click', function () {
+            apiRequest('POST', 'logout', {})
+                .catch(function () { /* ignore - we'll update the UI anyway */ })
+                .then(function () {
+                    renderSignedOut(slot);
+                });
         });
+        slot.appendChild(button);
+    }
+
+    function renderSignedOut(slot) {
+        clear(slot);
+        slot.appendChild(el('a', { className: 'user-menu-login', href: 'login.html', text: 'Sign in' }));
+    }
+
+    function bindLoginForm() {
+        var form = document.querySelector('[data-login-form]');
+        if (!form) {
+            return;
+        }
+        var errorNode = form.querySelector('[data-login-error]');
+        form.addEventListener('submit', function (event) {
+            event.preventDefault();
+            hideError(errorNode);
+            var data = new FormData(form);
+            var payload = {
+                username: String(data.get('username') || ''),
+                password: String(data.get('password') || '')
+            };
+            apiRequest('POST', 'login', payload)
+                .then(function () {
+                    window.location.href = 'index.html';
+                })
+                .catch(function (err) {
+                    showError(errorNode, err.message || 'Sign in failed');
+                });
+        });
+    }
+
+    function showError(node, message) {
+        if (!node) {
+            return;
+        }
+        node.textContent = message;
+        node.hidden = false;
+    }
+
+    function hideError(node) {
+        if (!node) {
+            return;
+        }
+        node.textContent = '';
+        node.hidden = true;
+    }
+
+    function fetchEndpoint(name) {
+        return apiRequest('GET', name);
+    }
+
+    // Generic API helper. Always sends/receives JSON and forwards the
+    // session cookie so the backend can identify the caller. The
+    // returned promise rejects with an Error whose .message is the
+    // server-supplied error string (or "HTTP <status>" as a fallback).
+    function apiRequest(method, endpoint, body) {
+        var options = {
+            method: method,
+            credentials: 'same-origin',
+            headers: { 'Accept': 'application/json' }
+        };
+        if (body !== undefined) {
+            options.headers['Content-Type'] = 'application/json';
+            options.body = JSON.stringify(body);
+        }
+        return fetch(API_URL + '?endpoint=' + encodeURIComponent(endpoint), options)
+            .then(function (response) {
+                return response.json().then(
+                    function (data) { return { response: response, data: data }; },
+                    function () { return { response: response, data: null }; }
+                );
+            })
+            .then(function (result) {
+                if (!result.response.ok) {
+                    var message = (result.data && result.data.error) || ('HTTP ' + result.response.status);
+                    var err = new Error(message);
+                    err.status = result.response.status;
+                    throw err;
+                }
+                return result.data;
+            });
     }
 
     function clear(node) {

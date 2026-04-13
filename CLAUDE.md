@@ -6,6 +6,7 @@ A small application that allows sharing multi-project progress with the world.
 
 ```
 bin/         PHP entry points for cronjobs, CLI tasks and tooling
+config/      Server-side configuration (user list, JWT secret); not served
 public/      Web root - only contains built, directly servable assets
 resources/   Source for HTML, CSS, JS and the PHP front controller
 src/         Backend PHP source for the API that handles the data
@@ -46,6 +47,31 @@ the document root; the API is exposed via the thin front controller in
 dispatches to `ProjectView\Api` (in `src/Api.php`). The frontend talks
 to that API via `fetch('index.php?endpoint=...')`.
 
+### `config/`
+Server-side configuration. Not reachable over HTTP and not copied into
+`public/` by the build. Currently holds `config/auth.php`, which lists
+the accounts allowed to sign in (username => bcrypt hash) and the
+secret used to sign session JWTs. Replace the JWT secret and user list
+before deploying.
+
+## Authentication
+
+The API supports a JWT-in-cookie login flow, intended as a gate for
+future write operations from the frontend.
+
+- `POST index.php?endpoint=login` with `{"username": "...", "password": "..."}`
+  verifies credentials against `config/auth.php` and, on success, sets
+  an HttpOnly `pv_auth` cookie carrying an HS256-signed JWT.
+- `POST index.php?endpoint=logout` clears the cookie.
+- `GET  index.php?endpoint=me` returns the current user or 401.
+
+Only accounts explicitly listed in `config/auth.php` can sign in;
+passwords are compared with `password_verify()`. JWTs are produced and
+validated by `src/Jwt.php`; `src/Auth.php` owns the cookie lifecycle.
+`resources/html/login.html` is the form that calls the `login`
+endpoint, and every page's nav includes a `[data-user-menu]` slot that
+`main.js` fills based on `me`.
+
 ## Current pages
 
 Each page ships an empty `[data-view]` container; `main.js` fetches the
@@ -59,6 +85,7 @@ currently returns example data only.
   version releases (`endpoint=releases`)
 - `time.html` - weekly breakdown of tracked hours per issue and
   category (`endpoint=time`)
+- `login.html` - sign-in form that calls `endpoint=login`
 
 ## Build
 

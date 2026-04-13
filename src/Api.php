@@ -11,17 +11,35 @@ declare(strict_types=1);
 
 namespace ProjectView;
 
+require_once __DIR__ . '/Auth.php';
+
 final class Api
 {
+    private Auth $auth;
+
+    public function __construct(?Auth $auth = null)
+    {
+        $this->auth = $auth ?? new Auth();
+    }
+
     /**
      * Dispatch a request to the matching endpoint method.
      *
+     * @param array<string, mixed> $body
      * @return array<string, mixed>
      * @throws \InvalidArgumentException When the endpoint is unknown.
+     * @throws UnauthorizedException     When the caller is not signed in.
+     * @throws BadRequestException       When the request payload is invalid.
      */
-    public function handle(string $endpoint): array
+    public function handle(string $endpoint, string $method = 'GET', array $body = []): array
     {
         switch ($endpoint) {
+            case 'login':
+                return $this->login($method, $body);
+            case 'logout':
+                return $this->logout($method);
+            case 'me':
+                return $this->me();
             case 'kanban':
                 return $this->kanban();
             case 'releases':
@@ -31,6 +49,54 @@ final class Api
             default:
                 throw new \InvalidArgumentException("unknown endpoint: {$endpoint}");
         }
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private function login(string $method, array $body): array
+    {
+        if ($method !== 'POST') {
+            throw new BadRequestException('login requires POST');
+        }
+        $username = isset($body['username']) && is_string($body['username']) ? $body['username'] : '';
+        $password = isset($body['password']) && is_string($body['password']) ? $body['password'] : '';
+        if ($username === '' || $password === '') {
+            throw new BadRequestException('username and password are required');
+        }
+
+        $token = $this->auth->attempt($username, $password);
+        if ($token === null) {
+            throw new UnauthorizedException('invalid credentials');
+        }
+        $this->auth->sendCookie($token);
+
+        return ['user' => ['name' => $username]];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function logout(string $method): array
+    {
+        if ($method !== 'POST') {
+            throw new BadRequestException('logout requires POST');
+        }
+        $this->auth->clearCookie();
+        return ['ok' => true];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function me(): array
+    {
+        $user = $this->auth->currentUser();
+        if ($user === null) {
+            throw new UnauthorizedException('not signed in');
+        }
+        return ['user' => ['name' => $user]];
     }
 
     /**
@@ -237,4 +303,12 @@ final class Api
             ],
         ];
     }
+}
+
+final class UnauthorizedException extends \RuntimeException
+{
+}
+
+final class BadRequestException extends \RuntimeException
+{
 }

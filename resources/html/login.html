@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign in - Project View</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header class="site-header">
+        <h1>Project View</h1>
+        <nav class="main-nav">
+            <a href="index.html">Overview</a>
+            <a href="kanban.html">Kanban</a>
+            <a href="releases.html">Releases</a>
+            <a href="time.html">Time Tracking</a>
+        </nav>
+        <div class="user-menu" data-user-menu></div>
+    </header>
+    <main class="container">
+        <section class="login">
+            <h2>Sign in</h2>
+            <p class="muted">Only accounts listed in the server-side config can sign in.</p>
+            <form class="login-form" data-login-form autocomplete="on">
+                <label class="login-field">
+                    <span>Username</span>
+                    <input type="text" name="username" autocomplete="username" required>
+                </label>
+                <label class="login-field">
+                    <span>Password</span>
+                    <input type="password" name="password" autocomplete="current-password" required>
+                </label>
+                <p class="login-error" data-login-error hidden></p>
+                <button type="submit" class="login-button">Sign in</button>
+            </form>
+        </section>
+    </main>
+    <footer class="site-footer">
+        <p>&copy; 2026 Björn Büttner</p>
+    </footer>
+    <script src="main.js"></script>
+</body>
+</html>
