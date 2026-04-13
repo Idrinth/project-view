@@ -609,14 +609,18 @@
         var issue = data && data.issue ? data.issue : {};
         var timeEntries = (data && data.timeEntries) || [];
         var comments = (data && data.comments) || [];
+        var blockedBy = (data && data.blockedBy) || [];
+        var blocks = (data && data.blocks) || [];
 
         container.appendChild(el('h3', { id: 'detail-title', text: issue.title || 'Task' }));
 
         var editSection = buildEditSection(issue, cardEl);
+        var linkSection = buildLinkSection(issue, blockedBy, blocks);
         var timeSection = buildTimeSection(issue, timeEntries, cardEl);
         var commentSection = buildCommentSection(issue, comments);
 
         container.appendChild(editSection);
+        container.appendChild(linkSection);
         container.appendChild(timeSection);
         container.appendChild(commentSection);
     }
@@ -648,6 +652,8 @@
         var statusOptions = [
             { value: 'todo', label: 'Todo' },
             { value: 'in-progress', label: 'In Progress' },
+            { value: 'waiting-external', label: 'Waiting for external' },
+            { value: 'waiting-internal', label: 'Waiting for internal' },
             { value: 'done', label: 'Done' },
             { value: 'discarded', label: 'Discarded' }
         ];
@@ -717,6 +723,144 @@
                     submitBtn.disabled = false;
                     statusNode.textContent = '';
                     errorNode.textContent = err.message || 'Failed to save';
+                    errorNode.hidden = false;
+                });
+        });
+
+        section.appendChild(form);
+        return section;
+    }
+
+    // Render the "Blocked by / Blocks" section of the detail modal:
+    // two lists of linked issues plus a small form to add a new
+    // "blocked by" link. Each row carries a remove button so the
+    // user can break the link without leaving the dialog.
+    function buildLinkSection(issue, blockedBy, blocks) {
+        var section = el('section', { className: 'detail-section' });
+        section.appendChild(el('h4', { text: 'Links' }));
+
+        var blockedByWrap = el('div', { className: 'detail-links' });
+        blockedByWrap.appendChild(el('p', {
+            className: 'detail-links-label',
+            text: 'Blocked by'
+        }));
+        var blockedByList = el('div');
+        blockedByWrap.appendChild(blockedByList);
+
+        var blocksWrap = el('div', { className: 'detail-links' });
+        blocksWrap.appendChild(el('p', {
+            className: 'detail-links-label',
+            text: 'Blocks'
+        }));
+        var blocksList = el('div');
+        blocksWrap.appendChild(blocksList);
+
+        function renderList(wrap, items, removable) {
+            clear(wrap);
+            if (!items.length) {
+                wrap.appendChild(el('p', {
+                    className: 'detail-empty',
+                    text: 'None.'
+                }));
+                return;
+            }
+            var list = el('ul', { className: 'detail-link-list' });
+            items.forEach(function (link) {
+                var statusLabel = (link.status || '').replace(/-/g, ' ');
+                var meta = '#' + link.id + ' \u00b7 ' + (link.title || '');
+                if (link.category) {
+                    meta += ' \u00b7 ' + link.category;
+                }
+                if (statusLabel) {
+                    meta += ' \u00b7 ' + statusLabel;
+                }
+                var children = [
+                    el('span', { className: 'detail-link-text', text: meta })
+                ];
+                if (removable) {
+                    var removeBtn = el('button', {
+                        type: 'button',
+                        className: 'detail-link-remove',
+                        text: 'Remove'
+                    });
+                    removeBtn.addEventListener('click', function () {
+                        removeBtn.disabled = true;
+                        apiRequest('POST', 'issue-link-remove', { linkId: link.linkId })
+                            .then(function () {
+                                var idx = items.indexOf(link);
+                                if (idx >= 0) {
+                                    items.splice(idx, 1);
+                                }
+                                renderList(wrap, items, removable);
+                            })
+                            .catch(function (err) {
+                                removeBtn.disabled = false;
+                                if (window.console) {
+                                    window.console.warn('issue-link-remove failed: ' + err.message);
+                                }
+                            });
+                    });
+                    children.push(removeBtn);
+                }
+                list.appendChild(el('li', { className: 'detail-link' }, children));
+            });
+            wrap.appendChild(list);
+        }
+
+        renderList(blockedByList, blockedBy, true);
+        renderList(blocksList, blocks, false);
+
+        section.appendChild(blockedByWrap);
+        section.appendChild(blocksWrap);
+
+        // Add-link form. Only "blocked by" is editable - the inverse
+        // direction is implied and shown above. Issue ids accept "#42"
+        // or "42" so users can paste either form.
+        var form = el('form', { className: 'detail-form detail-link-form' });
+        var blockerInput = el('input', {
+            type: 'text',
+            placeholder: 'Issue id (e.g. 42)',
+            required: 'required'
+        });
+        var submitBtn = el('button', {
+            type: 'submit',
+            className: 'detail-button',
+            text: 'Add blocker'
+        });
+        var statusNode = el('p', { className: 'detail-status' });
+        var errorNode = el('p', { className: 'detail-error', hidden: 'hidden' });
+
+        form.appendChild(field('Add blocker', blockerInput, false));
+        form.appendChild(el('div', { className: 'detail-actions' }, [submitBtn, statusNode]));
+        form.appendChild(errorNode);
+
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            errorNode.hidden = true;
+            errorNode.textContent = '';
+            var raw = blockerInput.value.trim().replace(/^#/, '');
+            var blockerId = parseInt(raw, 10);
+            if (!isFinite(blockerId) || blockerId <= 0) {
+                errorNode.textContent = 'Enter a positive issue id';
+                errorNode.hidden = false;
+                return;
+            }
+            submitBtn.disabled = true;
+            statusNode.textContent = 'Linking\u2026';
+            apiRequest('POST', 'issue-link-add', { id: issue.id, blockedBy: blockerId })
+                .then(function (result) {
+                    submitBtn.disabled = false;
+                    statusNode.textContent = 'Linked.';
+                    blockerInput.value = '';
+                    if (result && result.link) {
+                        blockedBy.push(result.link);
+                        renderList(blockedByList, blockedBy, true);
+                    }
+                })
+                .catch(function (err) {
+                    submitBtn.disabled = false;
+                    statusNode.textContent = '';
+                    errorNode.textContent = err.message || 'Failed to add link';
                     errorNode.hidden = false;
                 });
         });
@@ -1279,9 +1423,14 @@
             var columns = (data && data.columns) || [];
             var modal = canEdit ? buildAddCardModal() : null;
             columns.forEach(function (column) {
-                var section = el('section', {
-                    className: 'kanban-column' + (column.discarded ? ' kanban-column-discarded' : '')
-                });
+                var classes = 'kanban-column';
+                if (column.discarded) {
+                    classes += ' kanban-column-discarded';
+                }
+                if (column.id === 'waiting-external' || column.id === 'waiting-internal') {
+                    classes += ' kanban-column-waiting';
+                }
+                var section = el('section', { className: classes });
                 section.appendChild(el('h3', { className: 'kanban-title', text: column.title }));
 
                 var cardList = el('div', { className: 'kanban-cards' });
