@@ -125,6 +125,29 @@ final class Issues
         ]);
     }
 
+    /**
+     * Overwrite the work_started_at / work_completed_at columns on an
+     * issue. Used by the status transition logic in the API to stamp
+     * an issue when it leaves Todo (started) or enters Done/Discarded
+     * (completed); passing null for either argument clears that field.
+     */
+    public function setWorkTimestamps(int $id, ?string $workStartedAt, ?string $workCompletedAt): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE issues SET
+                work_started_at = :work_started_at,
+                work_completed_at = :work_completed_at,
+                updated_at = :updated_at
+             WHERE id = :id'
+        );
+        $stmt->execute([
+            'id'                => $id,
+            'work_started_at'   => $workStartedAt,
+            'work_completed_at' => $workCompletedAt,
+            'updated_at'        => gmdate('c'),
+        ]);
+    }
+
     public function update(
         int $id,
         string $title,
