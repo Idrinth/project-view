@@ -1100,6 +1100,27 @@ input:disabled:focus {
     text-decoration: line-through;
 }
 
+.release-contributors-heading {
+    margin: 0.5rem 0 0.25rem;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.release-contributors {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    font-size: 0.85rem;
+}
+
+.release-contributor-hours {
+    color: var(--color-text-subtle);
+}
+
 /* Time table */
 .table-wrap {
     overflow-x: auto;

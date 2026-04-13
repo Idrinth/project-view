@@ -641,6 +641,29 @@
                 }));
             }
             releaseChildren.push(el('p', { className: 'release-notes', text: release.notes }));
+            var contributors = Array.isArray(release.contributors) ? release.contributors : [];
+            if (contributors.length > 0) {
+                var contribList = el('ul', { className: 'release-contributors' });
+                contributors.forEach(function (contributor) {
+                    var name = contributor.displayName || contributor.username;
+                    if (!name) {
+                        name = '#' + contributor.userId;
+                    }
+                    contribList.appendChild(el('li', { className: 'release-contributor' }, [
+                        el('span', { className: 'release-contributor-name', text: name }),
+                        ' \u00b7 ',
+                        el('span', {
+                            className: 'release-contributor-hours',
+                            text: formatHours(contributor.hours) + 'h'
+                        })
+                    ]));
+                });
+                releaseChildren.push(el('p', {
+                    className: 'release-contributors-heading muted',
+                    text: 'Contributors'
+                }));
+                releaseChildren.push(contribList);
+            }
             var issues = Array.isArray(release.issues) ? release.issues : [];
             if (issues.length > 0) {
                 var issuesList = el('ul', { className: 'release-issues' });
