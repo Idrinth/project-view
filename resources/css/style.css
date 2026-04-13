@@ -104,6 +104,10 @@ a:hover {
     min-height: 200px;
 }
 
+.kanban-column-discarded {
+    background: #f3d6d6;
+}
+
 .kanban-title {
     margin-top: 0;
     font-size: 1rem;
@@ -112,12 +116,20 @@ a:hover {
     color: #52606d;
 }
 
+.kanban-column-discarded .kanban-title {
+    color: #8a2a2a;
+}
+
 .kanban-card {
     background: #fff;
     border-radius: 6px;
     padding: 0.75rem;
     margin-bottom: 0.75rem;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.kanban-column-discarded .kanban-card {
+    opacity: 0.85;
 }
 
 .kanban-card h4 {
@@ -129,6 +141,12 @@ a:hover {
     margin: 0;
     font-size: 0.8rem;
     color: #7b8794;
+}
+
+.kanban-time {
+    margin-top: 0.25rem;
+    font-weight: 600;
+    color: #52606d;
 }
 
 /* Releases */
