@@ -73,6 +73,9 @@ try {
 } catch (\ProjectView\UnauthorizedException $e) {
     http_response_code(401);
     echo json_encode(['error' => $e->getMessage()]);
+} catch (\ProjectView\ForbiddenException $e) {
+    http_response_code(403);
+    echo json_encode(['error' => $e->getMessage()]);
 } catch (\ProjectView\BadRequestException $e) {
     http_response_code(400);
     echo json_encode(['error' => $e->getMessage()]);
