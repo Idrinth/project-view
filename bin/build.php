@@ -130,9 +130,9 @@ foreach ($iterator as $file) {
     $extension = strtolower($file->getExtension());
     $basename  = $file->getBasename();
 
-    // Flatten the top-level resources/{html,css,js} folders so that
+    // Flatten the top-level resources/{html,css,js,php} folders so that
     // public/ contains a flat, directly servable set of files.
-    $relative = preg_replace('#^(html|css|js)[\\\\/]#', '', $relative) ?? $relative;
+    $relative = preg_replace('#^(html|css|js|php)[\\\\/]#', '', $relative) ?? $relative;
 
     $target = $public . '/' . $relative;
     $dir    = dirname($target);
