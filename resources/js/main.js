@@ -204,10 +204,90 @@
     var draggedOriginParent = null;
     var draggedOriginNext = null;
 
+    // Build the card shown on the releases page for a single
+    // project. When `withinGroup` is true the enclosing group
+    // already shows the umbrella category, so only the intermediate
+    // breadcrumb (everything between the root and the leaf) is
+    // surfaced to avoid repeating the group name on every card.
+    function buildReleaseProjectEl(project, withinGroup) {
+        var releases = project.releases || [];
+        var latest = releases[0];
+        var path = Array.isArray(project.path) ? project.path : [project.name];
+        var headerChildren = [el('h3', { text: project.name })];
+        if (withinGroup && path.length > 2) {
+            headerChildren.push(el('p', {
+                className: 'release-project-path',
+                text: path.slice(1, -1).join(' / ')
+            }));
+        }
+        if (latest) {
+            headerChildren.push(el('p', { className: 'release-project-meta' }, [
+                'Latest: ',
+                el('strong', { text: latest.version }),
+                ' \u00b7 ',
+                el('time', { datetime: latest.date, text: latest.date })
+            ]));
+        }
+
+        var list = el('ol', { className: 'release-list' });
+        releases.forEach(function (release) {
+            list.appendChild(el('li', { className: 'release' }, [
+                el('span', { className: 'release-version', text: release.version }),
+                el('time', {
+                    className: 'release-date',
+                    datetime: release.date,
+                    text: release.date
+                }),
+                el('p', { className: 'release-notes', text: release.notes })
+            ]));
+        });
+
+        return el('article', { className: 'release-project' }, [
+            el('header', { className: 'release-project-header' }, headerChildren),
+            list
+        ]);
+    }
+
+    // Collapse a [parents..., leaf] breadcrumb to a single line using
+    // the same separator as the backend. Falls back to `card.category`
+    // (the pre-hierarchy flat name) when no path is supplied.
+    function categoryLabel(card) {
+        var path = Array.isArray(card.categoryPath) ? card.categoryPath : null;
+        if (path && path.length > 0) {
+            return path.join(' / ');
+        }
+        return card.category || '';
+    }
+
     function buildCardEl(card, draggable) {
+        var path = Array.isArray(card.categoryPath) ? card.categoryPath : null;
+        var categoryNode;
+        if (path && path.length > 1) {
+            // Render a breadcrumb where each segment except the last
+            // is de-emphasised, so the leaf project (the thing the
+            // card actually belongs to) stands out at a glance.
+            var crumbs = [document.createTextNode('Category: ')];
+            for (var i = 0; i < path.length; i++) {
+                var isLeaf = i === path.length - 1;
+                crumbs.push(el('span', {
+                    className: isLeaf ? 'kanban-cat-leaf' : 'kanban-cat-parent',
+                    text: path[i]
+                }));
+                if (!isLeaf) {
+                    crumbs.push(el('span', { className: 'kanban-cat-sep', text: ' / ' }));
+                }
+            }
+            categoryNode = el('p', { className: 'kanban-meta kanban-category' }, crumbs);
+        } else {
+            categoryNode = el('p', {
+                className: 'kanban-meta',
+                text: 'Category: ' + categoryLabel(card)
+            });
+        }
+
         var cardEl = el('article', { className: 'kanban-card' }, [
             el('h4', { text: card.title }),
-            el('p', { className: 'kanban-meta', text: 'Category: ' + card.category }),
+            categoryNode,
             el('p', { className: 'kanban-meta', text: 'Milestone: ' + (card.milestone || '\u2014') }),
             el('p', { className: 'kanban-meta' }, ['Work started: ', dateOrDash(card.workStarted)]),
             el('p', { className: 'kanban-meta' }, ['Work completed: ', dateOrDash(card.workCompleted)]),
@@ -329,7 +409,7 @@
         });
         var categoryInput = el('input', {
             type: 'text',
-            placeholder: 'Category',
+            placeholder: 'Category (e.g. Mods / Skyrim / Idrinth Thalui)',
             className: 'kanban-add-input'
         });
         var milestoneInput = el('input', {
@@ -393,6 +473,7 @@
                         id: created.id != null ? created.id : null,
                         title: created.title || payload.title,
                         category: created.category || payload.category,
+                        categoryPath: Array.isArray(created.categoryPath) ? created.categoryPath : null,
                         milestone: created.milestone != null ? created.milestone : payload.milestone,
                         workStarted: created.workStarted != null ? created.workStarted : null,
                         workCompleted: created.workCompleted != null ? created.workCompleted : null,
@@ -442,36 +523,50 @@
 
         releases: function (container, data) {
             var projects = (data && data.projects) || [];
+
+            // Bucket projects by their top-level category. Projects
+            // sitting at the root (path length 1) become a group of
+            // their own so they still get a consistent heading.
+            var groupOrder = [];
+            var groups = {};
             projects.forEach(function (project) {
-                var releases = project.releases || [];
-                var latest = releases[0];
-                var headerChildren = [el('h3', { text: project.name })];
-                if (latest) {
-                    headerChildren.push(el('p', { className: 'release-project-meta' }, [
-                        'Latest: ',
-                        el('strong', { text: latest.version }),
-                        ' \u00b7 ',
-                        el('time', { datetime: latest.date, text: latest.date })
-                    ]));
+                var path = Array.isArray(project.path) ? project.path : [project.name];
+                var groupName = project.group || path[0] || project.name;
+                if (!groups[groupName]) {
+                    groups[groupName] = {
+                        name: groupName,
+                        // When the group name matches the only project
+                        // in it, render a flat single-project card;
+                        // otherwise render a labelled group section.
+                        grouped: path.length > 1,
+                        projects: []
+                    };
+                    groupOrder.push(groupName);
+                } else if (path.length > 1) {
+                    groups[groupName].grouped = true;
                 }
+                groups[groupName].projects.push(project);
+            });
 
-                var list = el('ol', { className: 'release-list' });
-                releases.forEach(function (release) {
-                    list.appendChild(el('li', { className: 'release' }, [
-                        el('span', { className: 'release-version', text: release.version }),
-                        el('time', {
-                            className: 'release-date',
-                            datetime: release.date,
-                            text: release.date
-                        }),
-                        el('p', { className: 'release-notes', text: release.notes })
-                    ]));
-                });
-
-                container.appendChild(el('article', { className: 'release-project' }, [
-                    el('header', { className: 'release-project-header' }, headerChildren),
-                    list
-                ]));
+            groupOrder.forEach(function (groupName) {
+                var group = groups[groupName];
+                if (group.grouped) {
+                    var section = el('section', { className: 'release-group' });
+                    section.appendChild(el('h3', {
+                        className: 'release-group-title',
+                        text: groupName
+                    }));
+                    var grid = el('div', { className: 'release-group-grid' });
+                    group.projects.forEach(function (project) {
+                        grid.appendChild(buildReleaseProjectEl(project, true));
+                    });
+                    section.appendChild(grid);
+                    container.appendChild(section);
+                } else {
+                    group.projects.forEach(function (project) {
+                        container.appendChild(buildReleaseProjectEl(project, false));
+                    });
+                }
             });
         },
 
