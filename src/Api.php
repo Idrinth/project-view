@@ -286,13 +286,17 @@ final class Api
         }
 
         $position = $this->nextPositionInStatus($status);
+        // If the card is being created directly in a later column
+        // (e.g. "In Progress" or "Done") stamp the transition points
+        // at creation so the timeline reflects reality.
+        [$workStarted, $workCompleted] = self::timestampsForStatus($status, null, null);
         $issueId = $this->issues->create(
             $projectId,
             $milestoneId,
             $title,
             $status,
-            null,
-            null,
+            $workStarted,
+            $workCompleted,
             $description !== '' ? $description : null
         );
         // Place the new card at the bottom of its column.
@@ -307,8 +311,8 @@ final class Api
                 'category'      => implode(self::CATEGORY_PATH_SEPARATOR, $path),
                 'categoryPath'  => $path,
                 'milestone'     => $milestone !== '' ? $milestone : null,
-                'workStarted'   => null,
-                'workCompleted' => null,
+                'workStarted'   => $workStarted,
+                'workCompleted' => $workCompleted,
                 'timeSpent'     => 0.0,
             ],
         ];
@@ -351,7 +355,59 @@ final class Api
         }
 
         $this->reorderWithin($to, $id, $index);
-        return ['ok' => true];
+
+        // Stamp the transition points when a card leaves Todo or
+        // enters Done/Discarded. Existing values are preserved so a
+        // card that is moved back and forth keeps the original start
+        // date rather than having it rewritten on every hop.
+        $currentStarted = isset($issue['work_started_at']) && $issue['work_started_at'] !== null
+            ? (string) $issue['work_started_at']
+            : null;
+        $currentCompleted = isset($issue['work_completed_at']) && $issue['work_completed_at'] !== null
+            ? (string) $issue['work_completed_at']
+            : null;
+        [$workStarted, $workCompleted] = self::timestampsForStatus($to, $currentStarted, $currentCompleted);
+        if ($workStarted !== $currentStarted || $workCompleted !== $currentCompleted) {
+            $this->issues->setWorkTimestamps($id, $workStarted, $workCompleted);
+        }
+
+        return [
+            'ok'   => true,
+            'card' => [
+                'id'            => $id,
+                'workStarted'   => $workStarted,
+                'workCompleted' => $workCompleted,
+            ],
+        ];
+    }
+
+    /**
+     * Decide what work_started_at / work_completed_at should be for an
+     * issue after it transitions to `$status`. A card that has already
+     * been started or completed keeps its original timestamp - we only
+     * fill blanks, never rewrite or clear them, so that moving a card
+     * backwards on the board doesn't destroy history.
+     *
+     * @return array{0: ?string, 1: ?string} [workStartedAt, workCompletedAt]
+     */
+    private static function timestampsForStatus(
+        string $status,
+        ?string $currentStarted,
+        ?string $currentCompleted
+    ): array {
+        $today = gmdate('Y-m-d');
+        $started = $currentStarted;
+        $completed = $currentCompleted;
+        if ($status !== Issues::STATUS_TODO && $started === null) {
+            $started = $today;
+        }
+        if (
+            ($status === Issues::STATUS_DONE || $status === Issues::STATUS_DISCARDED)
+            && $completed === null
+        ) {
+            $completed = $today;
+        }
+        return [$started, $completed];
     }
 
     /**

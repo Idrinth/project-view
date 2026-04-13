@@ -516,8 +516,10 @@
             descriptionNode,
             categoryNode,
             el('p', { className: 'kanban-meta', text: 'Milestone: ' + (card.milestone || '\u2014') }),
-            el('p', { className: 'kanban-meta' }, ['Work started: ', dateOrDash(card.workStarted)]),
-            el('p', { className: 'kanban-meta' }, ['Work completed: ', dateOrDash(card.workCompleted)]),
+            el('p', { className: 'kanban-meta', 'data-field': 'work-started' },
+                ['Work started: ', dateOrDash(card.workStarted)]),
+            el('p', { className: 'kanban-meta', 'data-field': 'work-completed' },
+                ['Work completed: ', dateOrDash(card.workCompleted)]),
             el('p', {
                 className: 'kanban-meta kanban-time',
                 text: 'Time spent: ' + formatHours(card.timeSpent) + 'h'
@@ -1019,11 +1021,33 @@
             from: from,
             to: to,
             index: index
+        }).then(function (response) {
+            // The backend fills in work_started_at / work_completed_at
+            // on status transitions; reflect those stamps on the card
+            // so the user sees them without a reload.
+            if (response && response.card) {
+                updateCardTimestamps(cardEl, response.card.workStarted, response.card.workCompleted);
+            }
         }).catch(function (err) {
             if (window.console) {
                 window.console.warn('kanban-move failed: ' + err.message);
             }
         });
+    }
+
+    function updateCardTimestamps(cardEl, workStarted, workCompleted) {
+        var started = cardEl.querySelector('[data-field="work-started"]');
+        if (started) {
+            started.textContent = '';
+            started.appendChild(document.createTextNode('Work started: '));
+            started.appendChild(dateOrDash(workStarted));
+        }
+        var completed = cardEl.querySelector('[data-field="work-completed"]');
+        if (completed) {
+            completed.textContent = '';
+            completed.appendChild(document.createTextNode('Work completed: '));
+            completed.appendChild(dateOrDash(workCompleted));
+        }
     }
 
     function findInsertBefore(cardListEl, y) {
