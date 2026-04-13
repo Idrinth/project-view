@@ -463,6 +463,26 @@ final class Database
             )",
             "CREATE INDEX IF NOT EXISTS idx_issue_links_issue ON issue_links(issue_id)",
             "CREATE INDEX IF NOT EXISTS idx_issue_links_blocker ON issue_links(blocked_by_id)",
+
+            // Per-user edit access grants against projects. A row here
+            // says the user may edit issues / time / comments under the
+            // referenced project and any of its descendants (grants
+            // inherit down the project tree). Users with no rows have
+            // no write access. The bootstrap admin (user id 1) bypasses
+            // this table entirely and can always edit everything.
+            //
+            // Managed from the CLI with bin/users.php access …
+            "CREATE TABLE IF NOT EXISTS project_access (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                project_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE (user_id, project_id),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_project_access_user ON project_access(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_project_access_project ON project_access(project_id)",
         ];
     }
 }

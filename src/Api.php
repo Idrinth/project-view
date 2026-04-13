@@ -15,6 +15,7 @@ namespace ProjectView;
 require_once __DIR__ . '/Auth.php';
 require_once __DIR__ . '/Database.php';
 require_once __DIR__ . '/Projects.php';
+require_once __DIR__ . '/ProjectAccess.php';
 require_once __DIR__ . '/Milestones.php';
 require_once __DIR__ . '/Issues.php';
 require_once __DIR__ . '/IssueLinks.php';
@@ -27,6 +28,7 @@ final class Api
     private Auth $auth;
     private Database $db;
     private Projects $projects;
+    private ProjectAccess $projectAccess;
     private Milestones $milestones;
     private Issues $issues;
     private IssueLinks $issueLinks;
@@ -39,6 +41,7 @@ final class Api
         $this->auth = $auth ?? new Auth();
         $this->db = $db ?? new Database();
         $this->projects = new Projects($this->db);
+        $this->projectAccess = new ProjectAccess($this->db);
         $this->milestones = new Milestones($this->db);
         $this->issues = new Issues($this->db);
         $this->issueLinks = new IssueLinks($this->db);
@@ -54,6 +57,7 @@ final class Api
      * @return array<string, mixed>
      * @throws \InvalidArgumentException When the endpoint is unknown.
      * @throws UnauthorizedException     When the caller is not signed in.
+     * @throws ForbiddenException        When the caller lacks edit access.
      * @throws BadRequestException       When the request payload is invalid.
      */
     public function handle(string $endpoint, string $method = 'GET', array $body = []): array
@@ -104,6 +108,80 @@ final class Api
             throw new UnauthorizedException('not signed in');
         }
         return $user;
+    }
+
+    /**
+     * Ensure the signed-in user may edit content under `$projectId`.
+     * The admin account (user id 1) always passes. Everyone else needs
+     * a matching row in `project_access`, either on the project itself
+     * or on one of its ancestors.
+     *
+     * @throws UnauthorizedException when no session is present.
+     * @throws ForbiddenException    when the session lacks edit access.
+     */
+    private function requireEditAccess(int $projectId): void
+    {
+        $userId = $this->auth->currentUserId();
+        if ($userId === null) {
+            throw new UnauthorizedException('not signed in');
+        }
+        if (!$this->projectAccess->canEdit($userId, $projectId)) {
+            throw new ForbiddenException('no edit access to this project');
+        }
+    }
+
+    /**
+     * Variant of requireEditAccess() for write paths that accept a
+     * category path string and auto-create missing intermediate nodes
+     * (kanban-add, issue-update with a new category). The access check
+     * runs against the deepest *existing* node so we never create
+     * orphan projects for callers that would then be rejected anyway.
+     * Creating a brand-new root category (no ancestor exists yet) is
+     * restricted to the admin account.
+     *
+     * @throws UnauthorizedException when no session is present.
+     * @throws ForbiddenException    when the session lacks edit access.
+     */
+    private function requireEditAccessForPath(string $path): void
+    {
+        $userId = $this->auth->currentUserId();
+        if ($userId === null) {
+            throw new UnauthorizedException('not signed in');
+        }
+        if ($userId === ProjectAccess::ADMIN_USER_ID) {
+            return;
+        }
+
+        $segments = [];
+        foreach (preg_split('#/#', $path) ?: [] as $piece) {
+            $trimmed = trim((string) $piece);
+            if ($trimmed !== '') {
+                $segments[] = $trimmed;
+            }
+        }
+        if ($segments === []) {
+            $segments = ['Uncategorised'];
+        }
+
+        $parentId = null;
+        $deepestExisting = 0;
+        foreach ($segments as $name) {
+            $existing = $this->projects->findByParentAndName($parentId, $name);
+            if ($existing === null) {
+                break;
+            }
+            $deepestExisting = (int) $existing['id'];
+            $parentId = $deepestExisting;
+        }
+
+        if ($deepestExisting === 0) {
+            // No part of the requested path exists yet; creating a new
+            // root-level category is an admin-only operation.
+            throw new ForbiddenException('no edit access to create new root categories');
+        }
+        if (!$this->projectAccess->canEdit($userId, $deepestExisting)) {
+            throw new ForbiddenException('no edit access to this project');
+        }
     }
 
     /**
@@ -287,6 +365,10 @@ final class Api
             $category = 'Uncategorised';
         }
 
+        // Enforce edit access before resolving the path so we never
+        // auto-create project nodes for callers that will be rejected.
+        $this->requireEditAccessForPath($category);
+
         [$projectId, $path] = $this->resolveProjectIdByPath($category);
         $milestoneId = null;
         if ($milestone !== '') {
@@ -361,6 +443,7 @@ final class Api
         if ($issue === null) {
             throw new BadRequestException('unknown issue');
         }
+        $this->requireEditAccess((int) $issue['project_id']);
 
         $this->reorderWithin($to, $id, $index);
 
@@ -568,6 +651,9 @@ final class Api
         if ($existing === null) {
             throw new BadRequestException('unknown issue');
         }
+        // Must be able to edit the card where it currently lives
+        // before making any change (title, status, category, …).
+        $this->requireEditAccess((int) $existing['project_id']);
 
         $title       = isset($body['title']) && is_string($body['title']) ? trim($body['title']) : '';
         $description = isset($body['description']) && is_string($body['description']) ? trim($body['description']) : '';
@@ -586,6 +672,11 @@ final class Api
         if ($category === '') {
             $category = 'Uncategorised';
         }
+
+        // Re-home into a different project requires edit access on the
+        // destination too; check before resolveProjectIdByPath() so a
+        // rejection does not leave freshly auto-created orphans behind.
+        $this->requireEditAccessForPath($category);
 
         [$projectId, $path] = $this->resolveProjectIdByPath($category);
         $milestoneId = null;
@@ -686,6 +777,7 @@ final class Api
         if ($issue === null) {
             throw new BadRequestException('unknown issue');
         }
+        $this->requireEditAccess((int) $issue['project_id']);
 
         $spentOn  = isset($body['spentOn'])  && is_string($body['spentOn'])  ? trim($body['spentOn'])  : '';
         $category = isset($body['category']) && is_string($body['category']) ? trim($body['category']) : '';
@@ -752,9 +844,11 @@ final class Api
         $author = $this->requireUser();
 
         $id = $this->readId($body);
-        if ($this->issues->find($id) === null) {
+        $issue = $this->issues->find($id);
+        if ($issue === null) {
             throw new BadRequestException('unknown issue');
         }
+        $this->requireEditAccess((int) $issue['project_id']);
 
         $text = isset($body['body']) && is_string($body['body']) ? trim($body['body']) : '';
         if ($text === '') {
@@ -801,9 +895,11 @@ final class Api
         if ($id === $blockedById) {
             throw new BadRequestException('an issue cannot block itself');
         }
-        if ($this->issues->find($id) === null) {
+        $issue = $this->issues->find($id);
+        if ($issue === null) {
             throw new BadRequestException('unknown issue');
         }
+        $this->requireEditAccess((int) $issue['project_id']);
         if ($this->issues->find($blockedById) === null) {
             throw new BadRequestException('unknown blocker');
         }
@@ -858,6 +954,21 @@ final class Api
         if ($linkId <= 0) {
             throw new BadRequestException('linkId is required');
         }
+
+        // Gate the delete on edit access for the issue that owns the
+        // "blocked by" side of the link. Unknown links fall through
+        // silently so repeated deletes stay idempotent.
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT i.project_id FROM issue_links l
+               JOIN issues i ON i.id = l.issue_id
+              WHERE l.id = :id'
+        );
+        $stmt->execute(['id' => $linkId]);
+        $row = $stmt->fetch();
+        if ($row !== false) {
+            $this->requireEditAccess((int) $row['project_id']);
+        }
+
         $this->issueLinks->delete($linkId);
         return ['ok' => true];
     }
@@ -1242,6 +1353,10 @@ final class Api
 }
 
 final class UnauthorizedException extends \RuntimeException
+{
+}
+
+final class ForbiddenException extends \RuntimeException
 {
 }
 
