@@ -507,7 +507,7 @@
 
         var list = el('ol', { className: 'release-list' });
         releases.forEach(function (release) {
-            list.appendChild(el('li', { className: 'release' }, [
+            var releaseChildren = [
                 el('span', { className: 'release-version', text: release.version }),
                 el('time', {
                     className: 'release-date',
@@ -515,7 +515,24 @@
                     text: release.date
                 }),
                 el('p', { className: 'release-notes', text: release.notes })
-            ]));
+            ];
+            var issues = Array.isArray(release.issues) ? release.issues : [];
+            if (issues.length > 0) {
+                var issuesList = el('ul', { className: 'release-issues' });
+                issues.forEach(function (issue) {
+                    var link = el('a', {
+                        className: 'release-issue-link',
+                        href: 'kanban.html#issue-' + issue.id,
+                        text: '#' + issue.id + ' ' + issue.title
+                    });
+                    var item = el('li', {
+                        className: 'release-issue release-issue-' + (issue.status || 'unknown')
+                    }, [link]);
+                    issuesList.appendChild(item);
+                });
+                releaseChildren.push(issuesList);
+            }
+            list.appendChild(el('li', { className: 'release' }, releaseChildren));
         });
 
         return el('article', { className: 'release-project' }, [

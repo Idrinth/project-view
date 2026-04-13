@@ -1021,6 +1021,7 @@ final class Api
         $stmt = $this->db->pdo()->query(
             'SELECT p.id AS project_id,
                     p.name AS project_name,
+                    m.id AS milestone_id,
                     m.name AS milestone_name,
                     m.released_at,
                     m.notes
@@ -1032,11 +1033,34 @@ final class Api
         /** @var list<array<string, mixed>> $rows */
         $rows = $stmt === false ? [] : $stmt->fetchAll();
 
+        // Pull the issues tied to each released milestone in one query
+        // so the per-release task list can be rendered without firing
+        // an N+1 lookup per release.
+        $issueStmt = $this->db->pdo()->query(
+            'SELECT i.id, i.title, i.status, i.milestone_id
+               FROM issues i
+               JOIN milestones m ON m.id = i.milestone_id
+              WHERE m.released_at IS NOT NULL
+           ORDER BY i.milestone_id, i.position, i.id'
+        );
+        /** @var list<array<string, mixed>> $issueRows */
+        $issueRows = $issueStmt === false ? [] : $issueStmt->fetchAll();
+        $issuesByMilestone = [];
+        foreach ($issueRows as $issueRow) {
+            $milestoneId = (int) $issueRow['milestone_id'];
+            $issuesByMilestone[$milestoneId][] = [
+                'id'     => (int) $issueRow['id'],
+                'title'  => (string) $issueRow['title'],
+                'status' => (string) $issueRow['status'],
+            ];
+        }
+
         $paths = $this->projects->allPaths();
 
         $projects = [];
         foreach ($rows as $row) {
             $projectId = (int) $row['project_id'];
+            $milestoneId = (int) $row['milestone_id'];
             $path = $paths[$projectId] ?? [(string) $row['project_name']];
             $key = implode(self::CATEGORY_PATH_SEPARATOR, $path);
             if (!isset($projects[$key])) {
@@ -1051,6 +1075,7 @@ final class Api
                 'version' => (string) $row['milestone_name'],
                 'date'    => (string) $row['released_at'],
                 'notes'   => $row['notes'] !== null ? (string) $row['notes'] : '',
+                'issues'  => $issuesByMilestone[$milestoneId] ?? [],
             ];
         }
 
