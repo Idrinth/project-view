@@ -4,7 +4,10 @@
 (function () {
     'use strict';
 
-    var API_URL = 'index.php';
+    // API endpoints are served as path segments (e.g. /login) by the
+    // .htaccess rewrite in front of index.php. We use a relative base
+    // so the app keeps working when deployed under a sub-path.
+    var API_BASE = './';
 
     document.addEventListener('DOMContentLoaded', function () {
         bindLoginForm();
@@ -136,7 +139,7 @@
             options.headers['Content-Type'] = 'application/json';
             options.body = JSON.stringify(body);
         }
-        return fetch(API_URL + '?endpoint=' + encodeURIComponent(endpoint), options)
+        return fetch(API_BASE + encodeURIComponent(endpoint), options)
             .then(function (response) {
                 return response.json().then(
                     function (data) { return { response: response, data: data }; },

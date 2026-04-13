@@ -2,8 +2,9 @@
 /**
  * Front controller for the Project View API.
  *
- * Routes ?endpoint=... requests to ProjectView\Api and emits the
- * response as JSON. Built into public/ by bin/build.php.
+ * Routes /endpoint-name requests (delivered as PATH_INFO via the
+ * .htaccess rewrite rules) to ProjectView\Api and emits the response
+ * as JSON. Built into public/ by bin/build.php.
  *
  * POST requests with a JSON body are parsed and forwarded to the
  * endpoint (this is how login credentials arrive).
@@ -16,9 +17,36 @@ require __DIR__ . '/../src/Api.php';
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
-$endpoint = isset($_GET['endpoint']) && is_string($_GET['endpoint'])
-    ? $_GET['endpoint']
+// Endpoint name comes from PATH_INFO (e.g. /login -> "login"). Fall
+// back to parsing REQUEST_URI when PATH_INFO is absent (some server
+// configurations strip it), and finally to ?endpoint=... for callers
+// that still use the legacy URL shape.
+$pathInfo = isset($_SERVER['PATH_INFO']) && is_string($_SERVER['PATH_INFO'])
+    ? $_SERVER['PATH_INFO']
     : '';
+if ($pathInfo === '' && isset($_SERVER['REQUEST_URI']) && is_string($_SERVER['REQUEST_URI'])) {
+    $uri = $_SERVER['REQUEST_URI'];
+    $queryPos = strpos($uri, '?');
+    if ($queryPos !== false) {
+        $uri = substr($uri, 0, $queryPos);
+    }
+    $scriptName = isset($_SERVER['SCRIPT_NAME']) && is_string($_SERVER['SCRIPT_NAME'])
+        ? $_SERVER['SCRIPT_NAME']
+        : '';
+    $scriptDir = $scriptName !== '' ? rtrim(dirname($scriptName), '/') : '';
+    if ($scriptName !== '' && strpos($uri, $scriptName) === 0) {
+        $pathInfo = substr($uri, strlen($scriptName));
+    } elseif ($scriptDir !== '' && strpos($uri, $scriptDir . '/') === 0) {
+        $pathInfo = substr($uri, strlen($scriptDir));
+    } else {
+        $pathInfo = $uri;
+    }
+}
+
+$endpoint = trim((string) $pathInfo, '/');
+if ($endpoint === '' && isset($_GET['endpoint']) && is_string($_GET['endpoint'])) {
+    $endpoint = $_GET['endpoint'];
+}
 
 $method = isset($_SERVER['REQUEST_METHOD']) && is_string($_SERVER['REQUEST_METHOD'])
     ? strtoupper($_SERVER['REQUEST_METHOD'])

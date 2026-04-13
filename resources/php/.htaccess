@@ -1,0 +1,17 @@
+# Route API calls through the front controller as PATH_INFO (e.g. /login
+# becomes index.php/login). Existing files and directories (the built
+# HTML/CSS/JS assets, index.php itself) keep serving directly. Using the
+# path instead of ?endpoint=... keeps the URL clean of query strings
+# that mod_security flags on API-looking requests.
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^(.+)$ index.php/$1 [L]
+</IfModule>
+
+# Some hosts disable PATH_INFO on .php files; turn it back on so the
+# front controller can read $_SERVER['PATH_INFO'].
+AcceptPathInfo On
