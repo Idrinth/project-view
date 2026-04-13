@@ -11,6 +11,7 @@
 
     document.addEventListener('DOMContentLoaded', function () {
         bindLoginForm();
+        initThemeToggle();
 
         // Fetch the current user once and share the result between the
         // nav user-menu and the view renderer. The promise never
@@ -306,6 +307,104 @@
         Object.keys(data).forEach(function (key) { result[key] = data[key]; });
         result.projects = projects;
         return result;
+    }
+
+    // localStorage key carrying the explicit theme preference, if any.
+    // Mirrors the small inline bootstrap script in each HTML <head>
+    // that sets data-theme on <html> before the first paint so there's
+    // no flash of the wrong palette. When the key is absent we fall
+    // back to the OS-level prefers-color-scheme.
+    var THEME_STORAGE_KEY = 'pv-theme';
+
+    // Inject a small theme-toggle button into the site header and wire
+    // it up to flip between light and dark mode. The button lives next
+    // to the user menu so the chrome stays together visually.
+    function initThemeToggle() {
+        var header = document.querySelector('.site-header');
+        if (!header) {
+            return;
+        }
+        if (header.querySelector('[data-theme-toggle]')) {
+            return;
+        }
+        var button = el('button', {
+            className: 'theme-toggle',
+            type: 'button'
+        });
+        button.setAttribute('data-theme-toggle', '');
+
+        var update = function () {
+            var current = currentTheme();
+            var next = current === 'dark' ? 'light' : 'dark';
+            button.textContent = next === 'dark' ? 'Dark mode' : 'Light mode';
+            button.setAttribute('aria-label', 'Switch to ' + next + ' mode');
+            button.setAttribute('aria-pressed', current === 'dark' ? 'true' : 'false');
+        };
+
+        button.addEventListener('click', function () {
+            var next = currentTheme() === 'dark' ? 'light' : 'dark';
+            applyTheme(next);
+            update();
+        });
+
+        // Insert before the user menu so the layout reads:
+        // [theme toggle] [user menu]. Falls back to appending if the
+        // slot isn't there for some reason.
+        var userMenu = header.querySelector('[data-user-menu]');
+        if (userMenu) {
+            header.insertBefore(button, userMenu);
+        } else {
+            header.appendChild(button);
+        }
+
+        update();
+
+        // React to OS-level dark-mode changes when the user hasn't
+        // picked a theme explicitly, so the button's label stays in
+        // sync with the palette the page is actually showing.
+        if (typeof window.matchMedia === 'function') {
+            var media = window.matchMedia('(prefers-color-scheme: dark)');
+            var listener = function () {
+                if (!storedTheme()) {
+                    update();
+                }
+            };
+            if (typeof media.addEventListener === 'function') {
+                media.addEventListener('change', listener);
+            } else if (typeof media.addListener === 'function') {
+                media.addListener(listener);
+            }
+        }
+    }
+
+    function storedTheme() {
+        try {
+            var value = window.localStorage.getItem(THEME_STORAGE_KEY);
+            return value === 'dark' || value === 'light' ? value : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function currentTheme() {
+        var stored = storedTheme();
+        if (stored) {
+            return stored;
+        }
+        if (typeof window.matchMedia === 'function'
+            && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            return 'dark';
+        }
+        return 'light';
+    }
+
+    function applyTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        try {
+            window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+        } catch (e) {
+            /* ignore - storage may be disabled */
+        }
     }
 
     // Populate the nav user-menu slot based on the resolved auth state.
