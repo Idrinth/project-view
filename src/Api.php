@@ -15,6 +15,7 @@ namespace ProjectView;
 require_once __DIR__ . '/Auth.php';
 require_once __DIR__ . '/Database.php';
 require_once __DIR__ . '/Projects.php';
+require_once __DIR__ . '/ProjectAccess.php';
 require_once __DIR__ . '/Milestones.php';
 require_once __DIR__ . '/Issues.php';
 require_once __DIR__ . '/IssueLinks.php';
@@ -22,12 +23,14 @@ require_once __DIR__ . '/TimeEntries.php';
 require_once __DIR__ . '/TimeAggregates.php';
 require_once __DIR__ . '/Comments.php';
 require_once __DIR__ . '/CommentAttachments.php';
+require_once __DIR__ . '/Users.php';
 
 final class Api
 {
     private Auth $auth;
     private Database $db;
     private Projects $projects;
+    private ProjectAccess $projectAccess;
     private Milestones $milestones;
     private Issues $issues;
     private IssueLinks $issueLinks;
@@ -35,12 +38,14 @@ final class Api
     private TimeAggregates $timeAggregates;
     private Comments $comments;
     private CommentAttachments $commentAttachments;
+    private Users $users;
 
     public function __construct(?Auth $auth = null, ?Database $db = null)
     {
         $this->auth = $auth ?? new Auth();
         $this->db = $db ?? new Database();
         $this->projects = new Projects($this->db);
+        $this->projectAccess = new ProjectAccess($this->db);
         $this->milestones = new Milestones($this->db);
         $this->issues = new Issues($this->db);
         $this->issueLinks = new IssueLinks($this->db);
@@ -48,6 +53,7 @@ final class Api
         $this->timeAggregates = new TimeAggregates($this->db);
         $this->comments = new Comments($this->db);
         $this->commentAttachments = new CommentAttachments($this->db);
+        $this->users = new Users($this->db);
     }
 
     /**
@@ -57,6 +63,7 @@ final class Api
      * @return array<string, mixed>
      * @throws \InvalidArgumentException When the endpoint is unknown.
      * @throws UnauthorizedException     When the caller is not signed in.
+     * @throws ForbiddenException        When the caller lacks edit access.
      * @throws BadRequestException       When the request payload is invalid.
      */
     public function handle(string $endpoint, string $method = 'GET', array $body = []): array
@@ -92,6 +99,10 @@ final class Api
                 return $this->releases();
             case 'time':
                 return $this->time();
+            case 'profile':
+                return $this->profile($method, $body);
+            case 'profile-picture':
+                return $this->profilePicture($method, $body);
             default:
                 throw new \InvalidArgumentException("unknown endpoint: {$endpoint}");
         }
@@ -109,6 +120,80 @@ final class Api
             throw new UnauthorizedException('not signed in');
         }
         return $user;
+    }
+
+    /**
+     * Ensure the signed-in user may edit content under `$projectId`.
+     * The admin account (user id 1) always passes. Everyone else needs
+     * a matching row in `project_access`, either on the project itself
+     * or on one of its ancestors.
+     *
+     * @throws UnauthorizedException when no session is present.
+     * @throws ForbiddenException    when the session lacks edit access.
+     */
+    private function requireEditAccess(int $projectId): void
+    {
+        $userId = $this->auth->currentUserId();
+        if ($userId === null) {
+            throw new UnauthorizedException('not signed in');
+        }
+        if (!$this->projectAccess->canEdit($userId, $projectId)) {
+            throw new ForbiddenException('no edit access to this project');
+        }
+    }
+
+    /**
+     * Variant of requireEditAccess() for write paths that accept a
+     * category path string and auto-create missing intermediate nodes
+     * (kanban-add, issue-update with a new category). The access check
+     * runs against the deepest *existing* node so we never create
+     * orphan projects for callers that would then be rejected anyway.
+     * Creating a brand-new root category (no ancestor exists yet) is
+     * restricted to the admin account.
+     *
+     * @throws UnauthorizedException when no session is present.
+     * @throws ForbiddenException    when the session lacks edit access.
+     */
+    private function requireEditAccessForPath(string $path): void
+    {
+        $userId = $this->auth->currentUserId();
+        if ($userId === null) {
+            throw new UnauthorizedException('not signed in');
+        }
+        if ($userId === ProjectAccess::ADMIN_USER_ID) {
+            return;
+        }
+
+        $segments = [];
+        foreach (preg_split('#/#', $path) ?: [] as $piece) {
+            $trimmed = trim((string) $piece);
+            if ($trimmed !== '') {
+                $segments[] = $trimmed;
+            }
+        }
+        if ($segments === []) {
+            $segments = ['Uncategorised'];
+        }
+
+        $parentId = null;
+        $deepestExisting = 0;
+        foreach ($segments as $name) {
+            $existing = $this->projects->findByParentAndName($parentId, $name);
+            if ($existing === null) {
+                break;
+            }
+            $deepestExisting = (int) $existing['id'];
+            $parentId = $deepestExisting;
+        }
+
+        if ($deepestExisting === 0) {
+            // No part of the requested path exists yet; creating a new
+            // root-level category is an admin-only operation.
+            throw new ForbiddenException('no edit access to create new root categories');
+        }
+        if (!$this->projectAccess->canEdit($userId, $deepestExisting)) {
+            throw new ForbiddenException('no edit access to this project');
+        }
     }
 
     /**
@@ -156,7 +241,230 @@ final class Api
         if ($user === null) {
             throw new UnauthorizedException('not signed in');
         }
-        return ['user' => ['name' => $user]];
+        // Surface the display name (when set) so the nav can address
+        // the user by how they prefer to be named without also having
+        // to pull the full profile — including the avatar — on every
+        // page load.
+        $row = $this->users->findByUsername($user);
+        $displayName = '';
+        if (is_array($row) && isset($row['display_name']) && is_string($row['display_name'])) {
+            $displayName = trim($row['display_name']);
+        }
+        return [
+            'user' => [
+                'name'        => $user,
+                'displayName' => $displayName,
+            ],
+        ];
+    }
+
+    /**
+     * Return (GET) or update (POST) the current user's self-service
+     * profile: display name, website URL, short about blurb and an
+     * optional avatar. The avatar is surfaced as a data URL so the
+     * page can render it without a second round trip.
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private function profile(string $method, array $body): array
+    {
+        $username = $this->requireUser();
+        $row = $this->users->findByUsername($username);
+        if (!is_array($row) || !isset($row['id'])) {
+            // The cookie decoded, but the account was deleted in the
+            // meantime. Treat that as unauthenticated.
+            throw new UnauthorizedException('not signed in');
+        }
+        $id = (int) $row['id'];
+
+        if ($method === 'GET') {
+            return ['profile' => self::profilePayload($row)];
+        }
+        if ($method !== 'POST') {
+            throw new BadRequestException('profile requires GET or POST');
+        }
+
+        $displayName = self::sanitizeProfileText($body['displayName'] ?? '', 80);
+        $about       = self::sanitizeProfileText($body['about'] ?? '', 500);
+        $websiteUrl  = self::sanitizeWebsiteUrl($body['websiteUrl'] ?? '');
+
+        $this->users->updateProfile($id, $displayName, $websiteUrl, $about);
+
+        $fresh = $this->users->findByUsername($username) ?? $row;
+        return ['profile' => self::profilePayload($fresh)];
+    }
+
+    /**
+     * Set (POST) or clear (DELETE) the current user's avatar. The
+     * image is posted as a base64 data URL (or `{mime, data}` pair)
+     * and stored inline in the users table so the build step cannot
+     * strand uploaded files in `public/`.
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private function profilePicture(string $method, array $body): array
+    {
+        $username = $this->requireUser();
+        $row = $this->users->findByUsername($username);
+        if (!is_array($row) || !isset($row['id'])) {
+            throw new UnauthorizedException('not signed in');
+        }
+        $id = (int) $row['id'];
+
+        if ($method === 'DELETE' || ($method === 'POST' && ($body['clear'] ?? false) === true)) {
+            $this->users->clearAvatar($id);
+            $fresh = $this->users->findByUsername($username) ?? $row;
+            return ['profile' => self::profilePayload($fresh)];
+        }
+        if ($method !== 'POST') {
+            throw new BadRequestException('profile-picture requires POST or DELETE');
+        }
+
+        [$mime, $base64] = self::parseAvatarUpload($body);
+        $this->users->setAvatar($id, $mime, $base64);
+
+        $fresh = $this->users->findByUsername($username) ?? $row;
+        return ['profile' => self::profilePayload($fresh)];
+    }
+
+    /**
+     * Shape a raw users row as the JSON profile payload. Keeps the
+     * sensitive bits (password hash) out of the response and folds the
+     * avatar into a single `avatar` data URL so the frontend can drop
+     * it straight into an <img>.
+     *
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private static function profilePayload(array $row): array
+    {
+        $avatar = null;
+        $mime = isset($row['avatar_mime']) && is_string($row['avatar_mime']) ? $row['avatar_mime'] : '';
+        $data = isset($row['avatar_data']) && is_string($row['avatar_data']) ? $row['avatar_data'] : '';
+        if ($mime !== '' && $data !== '') {
+            $avatar = 'data:' . $mime . ';base64,' . $data;
+        }
+        return [
+            'username'    => isset($row['username']) ? (string) $row['username'] : '',
+            'displayName' => isset($row['display_name']) && is_string($row['display_name'])
+                ? $row['display_name']
+                : '',
+            'websiteUrl'  => isset($row['website_url']) && is_string($row['website_url'])
+                ? $row['website_url']
+                : '',
+            'about'       => isset($row['about']) && is_string($row['about']) ? $row['about'] : '',
+            'avatar'      => $avatar,
+        ];
+    }
+
+    /**
+     * Trim and length-cap a free-form profile text field. Control
+     * characters other than tab, newline and carriage return are
+     * dropped so the stored value is safe to render as-is.
+     */
+    private static function sanitizeProfileText(mixed $value, int $maxLength): string
+    {
+        if (!is_string($value)) {
+            return '';
+        }
+        $value = trim($value);
+        if ($value === '') {
+            return '';
+        }
+        $value = (string) preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $value);
+        if (function_exists('mb_substr')) {
+            $value = mb_substr($value, 0, $maxLength);
+        } elseif (strlen($value) > $maxLength) {
+            $value = substr($value, 0, $maxLength);
+        }
+        return $value;
+    }
+
+    /**
+     * Validate an optional http(s) website URL. Empty values are
+     * allowed (the field is optional); anything else must parse as a
+     * URL with an http or https scheme so we never hand the UI a
+     * `javascript:` link it would dutifully click through.
+     */
+    private static function sanitizeWebsiteUrl(mixed $value): string
+    {
+        if (!is_string($value)) {
+            return '';
+        }
+        $value = trim($value);
+        if ($value === '') {
+            return '';
+        }
+        if (strlen($value) > 255) {
+            throw new BadRequestException('website URL is too long');
+        }
+        if (filter_var($value, FILTER_VALIDATE_URL) === false) {
+            throw new BadRequestException('website URL is not a valid URL');
+        }
+        $scheme = strtolower((string) parse_url($value, PHP_URL_SCHEME));
+        if ($scheme !== 'http' && $scheme !== 'https') {
+            throw new BadRequestException('website URL must be http or https');
+        }
+        return $value;
+    }
+
+    /**
+     * Extract the (mime, base64) tuple from an avatar upload. Accepts
+     * either a `data:<mime>;base64,<bytes>` URL in `image` or a
+     * `{mime, data}` pair. Rejects payloads outside the small
+     * allowlist of web image formats or over the per-user size cap.
+     *
+     * @param array<string, mixed> $body
+     * @return array{0: string, 1: string}
+     */
+    private static function parseAvatarUpload(array $body): array
+    {
+        $mime = '';
+        $base64 = '';
+
+        if (isset($body['image']) && is_string($body['image']) && $body['image'] !== '') {
+            $image = $body['image'];
+            if (preg_match('#^data:([a-zA-Z0-9.+-/]+);base64,([A-Za-z0-9+/=\s]+)$#', $image, $m) === 1) {
+                $mime = strtolower($m[1]);
+                $base64 = preg_replace('/\s+/', '', $m[2]) ?? '';
+            } else {
+                throw new BadRequestException('image must be a base64 data URL');
+            }
+        } else {
+            if (isset($body['mime']) && is_string($body['mime'])) {
+                $mime = strtolower(trim($body['mime']));
+            }
+            if (isset($body['data']) && is_string($body['data'])) {
+                $base64 = preg_replace('/\s+/', '', $body['data']) ?? '';
+            }
+        }
+
+        if ($mime === '' || $base64 === '') {
+            throw new BadRequestException('avatar image is required');
+        }
+
+        $allowed = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+        if (!in_array($mime, $allowed, true)) {
+            throw new BadRequestException(
+                'avatar must be one of: ' . implode(', ', $allowed)
+            );
+        }
+
+        // Cap the decoded size at ~256 KiB. base64 inflates by ~4/3,
+        // so the encoded column stays comfortably under 400 KiB.
+        $decoded = base64_decode($base64, true);
+        if ($decoded === false) {
+            throw new BadRequestException('avatar image is not valid base64');
+        }
+        if (strlen($decoded) > 262144) {
+            throw new BadRequestException('avatar image exceeds the 256 KB limit');
+        }
+
+        // Re-encode the decoded bytes so the stored value is free of
+        // whitespace or newline quirks from the client.
+        return [$mime, base64_encode($decoded)];
     }
 
     /**
@@ -292,6 +600,10 @@ final class Api
             $category = 'Uncategorised';
         }
 
+        // Enforce edit access before resolving the path so we never
+        // auto-create project nodes for callers that will be rejected.
+        $this->requireEditAccessForPath($category);
+
         [$projectId, $path] = $this->resolveProjectIdByPath($category);
         $milestoneId = null;
         if ($milestone !== '') {
@@ -366,6 +678,7 @@ final class Api
         if ($issue === null) {
             throw new BadRequestException('unknown issue');
         }
+        $this->requireEditAccess((int) $issue['project_id']);
 
         $this->reorderWithin($to, $id, $index);
 
@@ -576,6 +889,9 @@ final class Api
         if ($existing === null) {
             throw new BadRequestException('unknown issue');
         }
+        // Must be able to edit the card where it currently lives
+        // before making any change (title, status, category, …).
+        $this->requireEditAccess((int) $existing['project_id']);
 
         $title       = isset($body['title']) && is_string($body['title']) ? trim($body['title']) : '';
         $description = isset($body['description']) && is_string($body['description']) ? trim($body['description']) : '';
@@ -594,6 +910,11 @@ final class Api
         if ($category === '') {
             $category = 'Uncategorised';
         }
+
+        // Re-home into a different project requires edit access on the
+        // destination too; check before resolveProjectIdByPath() so a
+        // rejection does not leave freshly auto-created orphans behind.
+        $this->requireEditAccessForPath($category);
 
         [$projectId, $path] = $this->resolveProjectIdByPath($category);
         $milestoneId = null;
@@ -694,6 +1015,7 @@ final class Api
         if ($issue === null) {
             throw new BadRequestException('unknown issue');
         }
+        $this->requireEditAccess((int) $issue['project_id']);
 
         $spentOn  = isset($body['spentOn'])  && is_string($body['spentOn'])  ? trim($body['spentOn'])  : '';
         $category = isset($body['category']) && is_string($body['category']) ? trim($body['category']) : '';
@@ -768,9 +1090,11 @@ final class Api
         $author = $this->requireUser();
 
         $id = $this->readId($body);
-        if ($this->issues->find($id) === null) {
+        $issue = $this->issues->find($id);
+        if ($issue === null) {
             throw new BadRequestException('unknown issue');
         }
+        $this->requireEditAccess((int) $issue['project_id']);
 
         $text = isset($body['body']) && is_string($body['body']) ? trim($body['body']) : '';
         $uploads = self::extractUploadList($body);
@@ -829,8 +1153,11 @@ final class Api
     }
 
     /**
-     * Remove a single attachment from a comment. Signed-in only:
-     * the same permission model as posting comments.
+     * Remove a single attachment from a comment. Gated by the same
+     * per-project edit access check as the rest of the write paths,
+     * resolved via the owning comment's issue so a grant on the
+     * project (or one of its ancestors) lets the caller prune their
+     * own uploads.
      *
      * @param array<string, mixed> $body
      * @return array<string, mixed>
@@ -848,9 +1175,28 @@ final class Api
         if ($id <= 0) {
             throw new BadRequestException('id is required');
         }
-        if ($this->commentAttachments->find($id) === null) {
+        $attachment = $this->commentAttachments->find($id);
+        if ($attachment === null) {
             throw new BadRequestException('unknown attachment');
         }
+
+        // Walk attachment -> comment -> issue to find the project the
+        // edit-access check runs against. A missing comment or issue
+        // is treated as "unknown" rather than a server error: the
+        // cascade delete on comments/issues means those rows should
+        // always have taken this attachment with them anyway.
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT i.project_id
+               FROM comments c
+               JOIN issues i ON i.id = c.issue_id
+              WHERE c.id = :comment_id'
+        );
+        $stmt->execute(['comment_id' => (int) $attachment['comment_id']]);
+        $row = $stmt->fetch();
+        if ($row === false) {
+            throw new BadRequestException('unknown attachment');
+        }
+        $this->requireEditAccess((int) $row['project_id']);
 
         $this->commentAttachments->delete($id);
         return ['ok' => true];
@@ -1060,9 +1406,11 @@ final class Api
         if ($id === $blockedById) {
             throw new BadRequestException('an issue cannot block itself');
         }
-        if ($this->issues->find($id) === null) {
+        $issue = $this->issues->find($id);
+        if ($issue === null) {
             throw new BadRequestException('unknown issue');
         }
+        $this->requireEditAccess((int) $issue['project_id']);
         if ($this->issues->find($blockedById) === null) {
             throw new BadRequestException('unknown blocker');
         }
@@ -1117,6 +1465,21 @@ final class Api
         if ($linkId <= 0) {
             throw new BadRequestException('linkId is required');
         }
+
+        // Gate the delete on edit access for the issue that owns the
+        // "blocked by" side of the link. Unknown links fall through
+        // silently so repeated deletes stay idempotent.
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT i.project_id FROM issue_links l
+               JOIN issues i ON i.id = l.issue_id
+              WHERE l.id = :id'
+        );
+        $stmt->execute(['id' => $linkId]);
+        $row = $stmt->fetch();
+        if ($row !== false) {
+            $this->requireEditAccess((int) $row['project_id']);
+        }
+
         $this->issueLinks->delete($linkId);
         return ['ok' => true];
     }
@@ -1501,6 +1864,10 @@ final class Api
 }
 
 final class UnauthorizedException extends \RuntimeException
+{
+}
+
+final class ForbiddenException extends \RuntimeException
 {
 }
 

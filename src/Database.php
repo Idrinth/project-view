@@ -155,6 +155,15 @@ final class Database
         // built the index from schema().
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_time_entries_user ON time_entries(user_id)');
 
+        // Add the self-service profile columns on older installs. Each
+        // column is nullable so historical rows stay valid; new fields
+        // show up empty until the user edits their profile.
+        foreach (['display_name', 'website_url', 'about', 'avatar_mime', 'avatar_data'] as $column) {
+            if (!$this->hasColumn('users', $column)) {
+                $this->pdo->exec('ALTER TABLE users ADD COLUMN ' . $column . ' TEXT NULL');
+            }
+        }
+
         // Collapse the legacy split 'waiting-external' / 'waiting-internal'
         // statuses into a single 'waiting' status. Older installs have
         // rows tagged with the old values; the kanban only renders one
@@ -296,10 +305,21 @@ final class Database
             // produced with PHP's password_hash() (bcrypt / argon2)
             // and verified with password_verify(). Managed from the
             // CLI with bin/users.php.
+            // The optional profile columns (display_name, website_url,
+            // about, avatar_mime, avatar_data) hold the self-service
+            // profile a signed-in user can edit from profile.html. The
+            // avatar image is stored inline as base64 text alongside
+            // its MIME type so the build step (which wipes public/)
+            // cannot strand uploaded files on disk.
             "CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
+                display_name TEXT NULL,
+                website_url TEXT NULL,
+                about TEXT NULL,
+                avatar_mime TEXT NULL,
+                avatar_data TEXT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )",
@@ -487,6 +507,26 @@ final class Database
             )",
             "CREATE INDEX IF NOT EXISTS idx_issue_links_issue ON issue_links(issue_id)",
             "CREATE INDEX IF NOT EXISTS idx_issue_links_blocker ON issue_links(blocked_by_id)",
+
+            // Per-user edit access grants against projects. A row here
+            // says the user may edit issues / time / comments under the
+            // referenced project and any of its descendants (grants
+            // inherit down the project tree). Users with no rows have
+            // no write access. The bootstrap admin (user id 1) bypasses
+            // this table entirely and can always edit everything.
+            //
+            // Managed from the CLI with bin/users.php access …
+            "CREATE TABLE IF NOT EXISTS project_access (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                project_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE (user_id, project_id),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_project_access_user ON project_access(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_project_access_project ON project_access(project_id)",
         ];
     }
 }

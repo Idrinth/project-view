@@ -19,7 +19,13 @@
         // so callers can treat the value as a simple boolean.
         var userPromise = apiRequest('GET', 'me')
             .then(function (data) {
-                return (data && data.user && data.user.name) || null;
+                if (!data || !data.user || !data.user.name) {
+                    return null;
+                }
+                return {
+                    name: data.user.name,
+                    displayName: data.user.displayName || ''
+                };
             })
             .catch(function () {
                 return null;
@@ -413,21 +419,29 @@
     }
 
     // Populate the nav user-menu slot based on the resolved auth state.
-    function renderUserMenu(name) {
+    function renderUserMenu(user) {
         var slot = document.querySelector('[data-user-menu]');
         if (!slot) {
             return;
         }
-        if (name) {
-            renderSignedIn(slot, name);
+        if (user && user.name) {
+            renderSignedIn(slot, user);
         } else {
             renderSignedOut(slot);
         }
     }
 
-    function renderSignedIn(slot, name) {
+    function renderSignedIn(slot, user) {
         clear(slot);
-        slot.appendChild(el('span', { className: 'user-menu-name', text: name }));
+        // Prefer the user-chosen display name; fall back to the login
+        // username so the slot is never empty. The name links to the
+        // profile editor so it doubles as the entry point.
+        var label = (user.displayName || '').trim() || user.name;
+        slot.appendChild(el('a', {
+            className: 'user-menu-name',
+            href: 'profile.html',
+            text: label
+        }));
         var button = el('button', { className: 'user-menu-logout', type: 'button', text: 'Sign out' });
         button.addEventListener('click', function () {
             apiRequest('POST', 'logout', {})
@@ -1853,6 +1867,236 @@
         return el('div', { className: 'kanban-add' }, [button]);
     }
 
+    // ---------------------------------------------------------------
+    // Profile page: show the current user's profile and let them edit
+    // the display name / website URL / about blurb, plus upload or
+    // clear an avatar image. Signed-out visitors get a short nudge
+    // toward the sign-in page instead; the profile API requires auth.
+    // ---------------------------------------------------------------
+    var PROFILE_AVATAR_MAX_BYTES = 256 * 1024;
+    var PROFILE_AVATAR_MIMES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+
+    function renderProfilePage(container, data, options) {
+        if (!options || !options.user) {
+            container.appendChild(el('p', { className: 'muted' }, [
+                'You need to ',
+                el('a', { href: 'login.html', text: 'sign in' }),
+                ' to edit your profile.'
+            ]));
+            return;
+        }
+
+        var profile = (data && data.profile) || {};
+
+        var heading = el('h2', { className: 'profile-title', text: 'Your profile' });
+        var subtitle = el('p', {
+            className: 'muted profile-subtitle',
+            text: 'Signed in as ' + (profile.username || options.user.name || '')
+        });
+        container.appendChild(heading);
+        container.appendChild(subtitle);
+
+        var status = el('p', { className: 'profile-status', hidden: 'hidden' });
+
+        // Avatar section: preview on top, file picker + clear button
+        // below. The preview is updated on a successful upload so the
+        // user sees the round trip without a full page refresh.
+        var avatarImg = el('img', { className: 'profile-avatar', alt: '' });
+        var avatarPlaceholder = el('div', { className: 'profile-avatar profile-avatar-placeholder' });
+        var avatarSlot = el('div', { className: 'profile-avatar-slot' });
+
+        function showAvatar(dataUrl) {
+            clear(avatarSlot);
+            if (dataUrl) {
+                avatarImg.src = dataUrl;
+                avatarImg.alt = (profile.displayName || profile.username || '') + ' avatar';
+                avatarSlot.appendChild(avatarImg);
+            } else {
+                avatarPlaceholder.textContent = (profile.displayName || profile.username || '?')
+                    .charAt(0).toUpperCase();
+                avatarSlot.appendChild(avatarPlaceholder);
+            }
+        }
+        showAvatar(profile.avatar);
+
+        var fileInput = el('input', {
+            type: 'file',
+            accept: PROFILE_AVATAR_MIMES.join(','),
+            className: 'profile-file'
+        });
+        var uploadBtn = el('button', {
+            type: 'button',
+            className: 'profile-button profile-upload',
+            text: 'Upload picture'
+        });
+        var clearAvatarBtn = el('button', {
+            type: 'button',
+            className: 'profile-button profile-button-secondary',
+            text: 'Remove picture'
+        });
+
+        uploadBtn.addEventListener('click', function () { fileInput.click(); });
+        fileInput.addEventListener('change', function () {
+            var file = fileInput.files && fileInput.files[0];
+            if (!file) {
+                return;
+            }
+            if (PROFILE_AVATAR_MIMES.indexOf(file.type) === -1) {
+                showProfileStatus(status,
+                    'Please pick a PNG, JPEG, GIF or WebP image.', true);
+                fileInput.value = '';
+                return;
+            }
+            if (file.size > PROFILE_AVATAR_MAX_BYTES) {
+                showProfileStatus(status,
+                    'The image must be 256 KB or smaller.', true);
+                fileInput.value = '';
+                return;
+            }
+            readFileAsDataUrl(file).then(function (dataUrl) {
+                return apiRequest('POST', 'profile-picture', { image: dataUrl });
+            }).then(function (result) {
+                var fresh = (result && result.profile) || {};
+                profile.avatar = fresh.avatar || null;
+                showAvatar(profile.avatar);
+                showProfileStatus(status, 'Profile picture updated.', false);
+            }).catch(function (err) {
+                showProfileStatus(status, err.message || 'Upload failed.', true);
+            }).then(function () {
+                fileInput.value = '';
+            });
+        });
+
+        clearAvatarBtn.addEventListener('click', function () {
+            apiRequest('POST', 'profile-picture', { clear: true })
+                .then(function (result) {
+                    var fresh = (result && result.profile) || {};
+                    profile.avatar = fresh.avatar || null;
+                    showAvatar(profile.avatar);
+                    showProfileStatus(status, 'Profile picture removed.', false);
+                })
+                .catch(function (err) {
+                    showProfileStatus(status, err.message || 'Remove failed.', true);
+                });
+        });
+
+        var avatarSection = el('div', { className: 'profile-avatar-section' }, [
+            avatarSlot,
+            el('div', { className: 'profile-avatar-actions' }, [
+                uploadBtn,
+                clearAvatarBtn,
+                el('p', {
+                    className: 'muted profile-avatar-hint',
+                    text: 'PNG, JPEG, GIF or WebP. Up to 256 KB.'
+                })
+            ])
+        ]);
+
+        // Text fields: display name, website, about. Plain <form>
+        // submission so the browser handles keyboard accessibility
+        // (Enter to submit, focus ring, labels-for) for free.
+        var displayNameInput = el('input', {
+            type: 'text',
+            name: 'displayName',
+            maxlength: '80',
+            className: 'profile-input',
+            value: profile.displayName || ''
+        });
+        var websiteUrlInput = el('input', {
+            type: 'url',
+            name: 'websiteUrl',
+            maxlength: '255',
+            placeholder: 'https://example.com',
+            className: 'profile-input',
+            value: profile.websiteUrl || ''
+        });
+        var aboutInput = el('textarea', {
+            name: 'about',
+            maxlength: '500',
+            rows: '4',
+            className: 'profile-input profile-textarea'
+        });
+        aboutInput.value = profile.about || '';
+
+        var form = el('form', { className: 'profile-form' }, [
+            el('label', { className: 'profile-field' }, [
+                el('span', { text: 'Display name' }),
+                displayNameInput
+            ]),
+            el('label', { className: 'profile-field' }, [
+                el('span', { text: 'Website (optional)' }),
+                websiteUrlInput
+            ]),
+            el('label', { className: 'profile-field' }, [
+                el('span', { text: 'About' }),
+                aboutInput
+            ]),
+            el('div', { className: 'profile-actions' }, [
+                el('button', {
+                    type: 'submit',
+                    className: 'profile-button profile-save',
+                    text: 'Save profile'
+                })
+            ])
+        ]);
+
+        form.addEventListener('submit', function (event) {
+            event.preventDefault();
+            var payload = {
+                displayName: displayNameInput.value,
+                websiteUrl: websiteUrlInput.value,
+                about: aboutInput.value
+            };
+            apiRequest('POST', 'profile', payload)
+                .then(function (result) {
+                    var fresh = (result && result.profile) || {};
+                    profile.displayName = fresh.displayName || '';
+                    profile.websiteUrl = fresh.websiteUrl || '';
+                    profile.about = fresh.about || '';
+                    displayNameInput.value = profile.displayName;
+                    websiteUrlInput.value = profile.websiteUrl;
+                    aboutInput.value = profile.about;
+                    showProfileStatus(status, 'Profile saved.', false);
+                    // Sync the nav so the header reflects the new name
+                    // without waiting for the next page load.
+                    renderUserMenu({
+                        name: profile.username || options.user.name,
+                        displayName: profile.displayName
+                    });
+                })
+                .catch(function (err) {
+                    showProfileStatus(status, err.message || 'Save failed.', true);
+                });
+        });
+
+        container.appendChild(avatarSection);
+        container.appendChild(form);
+        container.appendChild(status);
+        container.appendChild(fileInput);
+    }
+
+    function showProfileStatus(node, message, isError) {
+        if (!node) {
+            return;
+        }
+        node.textContent = message;
+        node.hidden = false;
+        if (isError) {
+            node.classList.add('profile-status-error');
+        } else {
+            node.classList.remove('profile-status-error');
+        }
+    }
+
+    function readFileAsDataUrl(file) {
+        return new Promise(function (resolve, reject) {
+            var reader = new FileReader();
+            reader.onload = function () { resolve(String(reader.result || '')); };
+            reader.onerror = function () { reject(new Error('Could not read the file.')); };
+            reader.readAsDataURL(file);
+        });
+    }
+
     var renderers = {
         kanban: function (container, data, options) {
             var canEdit = !!(options && options.user);
@@ -1941,6 +2185,10 @@
                     });
                 }
             });
+        },
+
+        profile: function (container, data, options) {
+            renderProfilePage(container, data, options);
         },
 
         time: function (container, data) {
