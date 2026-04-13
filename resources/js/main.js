@@ -86,6 +86,11 @@
 
         render();
 
+        // Deep-link support: if the page was opened with a hash like
+        // `#issue-42`, pop the detail view for that issue straight away
+        // so the URL can be shared as a direct link to a card.
+        maybeOpenIssueFromHash(container);
+
         // Passively re-fetch the view payload every ~10 minutes so
         // viewers see newly-added cards and edits without reloading.
         // Ticks are skipped when the user is mid-interaction (drag,
@@ -603,6 +608,67 @@
         return cardEl;
     }
 
+    // Extract an issue id from a `#issue-<id>` URL hash. Returns null
+    // when the hash is absent or doesn't match the expected shape so
+    // callers can use the result as a simple truthiness test.
+    function parseIssueHash() {
+        var hash = String(window.location.hash || '').replace(/^#/, '');
+        var match = /^issue-(\d+)$/.exec(hash);
+        if (!match) {
+            return null;
+        }
+        var id = parseInt(match[1], 10);
+        return isFinite(id) && id > 0 ? id : null;
+    }
+
+    // Write/remove the `#issue-<id>` fragment via history.replaceState
+    // so it doesn't pollute the browser's back-stack and doesn't fire
+    // a hashchange event that would re-enter the open/close logic.
+    function setIssueHash(id) {
+        var target = '#issue-' + id;
+        if (window.location.hash === target) {
+            return;
+        }
+        if (window.history && window.history.replaceState) {
+            window.history.replaceState(null, '', target);
+        } else {
+            window.location.hash = 'issue-' + id;
+        }
+    }
+
+    function clearIssueHash() {
+        if (!window.location.hash) {
+            return;
+        }
+        if (window.history && window.history.replaceState) {
+            var url = window.location.pathname + window.location.search;
+            window.history.replaceState(null, '', url);
+        } else {
+            window.location.hash = '';
+        }
+    }
+
+    // On first render, check the URL hash and pop open the matching
+    // card's detail view so e.g. kanban.html#issue-42 lands directly on
+    // issue 42. The card element is looked up so edits still propagate
+    // back to the board, but a missing cardEl is tolerated (the issue
+    // may be filtered out of the current view, or live on another page)
+    // since the modal fetches its own payload from the API.
+    function maybeOpenIssueFromHash(container) {
+        if (!document.querySelector('[data-detail-overlay]')) {
+            return;
+        }
+        var id = parseIssueHash();
+        if (!id) {
+            return;
+        }
+        var cardEl = null;
+        if (container && typeof container.querySelector === 'function') {
+            cardEl = container.querySelector('[data-card-id="' + id + '"]');
+        }
+        openDetailView(id, cardEl);
+    }
+
     // Task detail modal. Shares one overlay (defined in kanban.html)
     // across every card; each open() replaces its contents.
     function openDetailView(issueId, cardEl) {
@@ -615,6 +681,9 @@
         overlay.hidden = false;
         clear(body);
         body.appendChild(el('p', { className: 'muted', text: 'Loading\u2026' }));
+        // Reflect the open card in the URL so users can copy/share a
+        // direct link to it. Cleared again in close().
+        setIssueHash(issueId);
 
         function close() {
             overlay.hidden = true;
@@ -624,6 +693,7 @@
             if (closeBtn) {
                 closeBtn.removeEventListener('click', close);
             }
+            clearIssueHash();
         }
         function onOverlayClick(e) {
             if (e.target === overlay) {
