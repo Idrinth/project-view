@@ -2,17 +2,19 @@
 /**
  * Authentication configuration for Project View.
  *
- * Lists the accounts that are allowed to sign in and holds the secret
- * used to sign session JWTs. This file lives outside of public/ and is
+ * Holds the secret used to sign session JWTs and the cookie settings
+ * used to deliver them. This file lives outside of public/ and is
  * only loaded server-side by src/Auth.php.
  *
- * Password hashes must be produced with PHP's password_hash() (bcrypt
- * or argon2). Generate one with:
+ * Accounts are stored in the database (the `users` table) and are
+ * managed from the command line:
  *
- *     php -r "echo password_hash('your-password', PASSWORD_BCRYPT), \"\n\";"
+ *     php bin/users.php add    <username>
+ *     php bin/users.php passwd <username>
+ *     php bin/users.php list
+ *     php bin/users.php delete <username>
  *
- * The example entry below accepts the password "admin" - replace it
- * (and the JWT secret) before deploying.
+ * Replace the JWT secret below before deploying.
  */
 
 declare(strict_types=1);
@@ -31,9 +33,4 @@ return [
     // Set to true when serving over HTTPS so the cookie is only sent
     // over a secure connection. Keep false for local HTTP development.
     'cookie_secure' => false,
-
-    // username => password hash. Only accounts listed here can sign in.
-    'users' => [
-        'admin' => '$2y$12$rOmP8mcsdsGfSlrHve0.eu0bvl8wpvsdVknn.9fWc0XDEn8.8eupy',
-    ],
 ];
