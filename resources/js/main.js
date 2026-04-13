@@ -533,14 +533,40 @@
         });
     }
 
-    function buildAddCardUi(cardListEl, columnId) {
-        var wrap = el('div', { className: 'kanban-add' });
-        var button = el('button', {
-            type: 'button',
-            className: 'kanban-add-button',
-            text: '+ Add card'
+    // Shared "Add card" modal for the kanban board. One instance is
+    // built per board render; each column registers itself with the
+    // modal and installs a "+ Add card" button that opens the dialog
+    // pre-selected to that column. The modal can also be dismissed
+    // via Escape or by clicking the backdrop.
+    function buildAddCardModal() {
+        var columnsMap = {};
+        var escHandler = null;
+
+        var overlay = el('div', { className: 'kanban-modal-overlay', hidden: 'hidden' });
+        var dialog = el('div', {
+            className: 'kanban-modal',
+            role: 'dialog',
+            'aria-modal': 'true',
+            'aria-labelledby': 'kanban-modal-title'
         });
-        var form = el('form', { className: 'kanban-add-form', hidden: 'hidden' });
+        var heading = el('h3', {
+            id: 'kanban-modal-title',
+            className: 'kanban-modal-title',
+            text: 'Add card'
+        });
+        var closeX = el('button', {
+            type: 'button',
+            className: 'kanban-modal-close',
+            'aria-label': 'Close'
+        });
+        closeX.textContent = '\u00d7';
+
+        var form = el('form', { className: 'kanban-add-form kanban-modal-form' });
+        var columnSelect = el('select', { className: 'kanban-add-input' });
+        var columnLabel = el('label', { className: 'kanban-add-label' }, [
+            document.createTextNode('Column'),
+            columnSelect
+        ]);
         var titleInput = el('input', {
             type: 'text',
             placeholder: 'Title',
@@ -574,6 +600,8 @@
         });
         var errorNode = el('p', { className: 'kanban-add-error', hidden: 'hidden' });
         var actions = el('div', { className: 'kanban-add-actions' }, [submitBtn, cancelBtn]);
+
+        form.appendChild(columnLabel);
         form.appendChild(titleInput);
         form.appendChild(descriptionInput);
         form.appendChild(categoryInput);
@@ -581,26 +609,55 @@
         form.appendChild(errorNode);
         form.appendChild(actions);
 
-        function openForm() {
-            button.hidden = true;
-            form.hidden = false;
-            titleInput.focus();
-        }
-        function closeForm() {
+        var header = el('div', { className: 'kanban-modal-header' }, [heading, closeX]);
+        dialog.appendChild(header);
+        dialog.appendChild(form);
+        overlay.appendChild(dialog);
+
+        function open(columnId) {
             form.reset();
-            form.hidden = true;
-            button.hidden = false;
+            if (columnsMap[columnId]) {
+                columnSelect.value = columnId;
+            }
             errorNode.hidden = true;
             errorNode.textContent = '';
             submitBtn.disabled = false;
+            overlay.hidden = false;
+            document.body.classList.add('kanban-modal-open');
+            escHandler = function (e) {
+                if (e.key === 'Escape') {
+                    close();
+                }
+            };
+            document.addEventListener('keydown', escHandler);
+            titleInput.focus();
+        }
+        function close() {
+            overlay.hidden = true;
+            document.body.classList.remove('kanban-modal-open');
+            if (escHandler) {
+                document.removeEventListener('keydown', escHandler);
+                escHandler = null;
+            }
         }
 
-        button.addEventListener('click', openForm);
-        cancelBtn.addEventListener('click', closeForm);
+        cancelBtn.addEventListener('click', close);
+        closeX.addEventListener('click', close);
+        overlay.addEventListener('click', function (e) {
+            if (e.target === overlay) {
+                close();
+            }
+        });
+
         form.addEventListener('submit', function (e) {
             e.preventDefault();
             var title = titleInput.value.trim();
             if (!title) {
+                return;
+            }
+            var columnId = columnSelect.value;
+            var column = columnsMap[columnId];
+            if (!column) {
                 return;
             }
             var payload = {
@@ -627,8 +684,8 @@
                         workCompleted: created.workCompleted != null ? created.workCompleted : null,
                         timeSpent: created.timeSpent != null ? created.timeSpent : 0.0
                     }, true);
-                    cardListEl.appendChild(card);
-                    closeForm();
+                    column.cardListEl.appendChild(card);
+                    close();
                 })
                 .catch(function (err) {
                     submitBtn.disabled = false;
@@ -637,15 +694,36 @@
                 });
         });
 
-        wrap.appendChild(button);
-        wrap.appendChild(form);
-        return wrap;
+        return {
+            root: overlay,
+            registerColumn: function (columnId, columnTitle, cardListEl) {
+                columnsMap[columnId] = { cardListEl: cardListEl, title: columnTitle };
+                columnSelect.appendChild(el('option', {
+                    value: columnId,
+                    text: columnTitle
+                }));
+            },
+            open: open
+        };
+    }
+
+    function buildAddCardButton(modal, columnId) {
+        var button = el('button', {
+            type: 'button',
+            className: 'kanban-add-button',
+            text: '+ Add card'
+        });
+        button.addEventListener('click', function () {
+            modal.open(columnId);
+        });
+        return el('div', { className: 'kanban-add' }, [button]);
     }
 
     var renderers = {
         kanban: function (container, data, options) {
             var canEdit = !!(options && options.user);
             var columns = (data && data.columns) || [];
+            var modal = canEdit ? buildAddCardModal() : null;
             columns.forEach(function (column) {
                 var section = el('section', {
                     className: 'kanban-column' + (column.discarded ? ' kanban-column-discarded' : '')
@@ -661,12 +739,16 @@
                     makeDropTarget(cardList);
                 }
                 section.appendChild(cardList);
-                if (canEdit) {
-                    section.appendChild(buildAddCardUi(cardList, column.id));
+                if (canEdit && modal) {
+                    modal.registerColumn(column.id, column.title, cardList);
+                    section.appendChild(buildAddCardButton(modal, column.id));
                 }
 
                 container.appendChild(section);
             });
+            if (modal) {
+                container.appendChild(modal.root);
+            }
         },
 
         releases: function (container, data) {
