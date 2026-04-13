@@ -19,6 +19,11 @@
     </header>
     <main class="container">
         <h2>Kanban Board</h2>
+        <div class="category-filter">
+            <label class="category-filter-label" for="category-filter-input">Filter by category</label>
+            <input type="text" id="category-filter-input" data-category-filter placeholder="e.g. Mods / Skyrim">
+            <button type="button" class="category-filter-clear" data-category-filter-clear>Clear</button>
+        </div>
         <div class="kanban" data-view="kanban">
             <p class="muted" data-loading>Loading kanban board&hellip;</p>
         </div>
