@@ -45,8 +45,22 @@ final class Api
                     'title'     => 'Todo',
                     'discarded' => false,
                     'cards'     => [
-                        ['title' => 'Sample task A', 'category' => 'Backend',  'timeSpent' => 0.0],
-                        ['title' => 'Sample task B', 'category' => 'Design',   'timeSpent' => 0.0],
+                        [
+                            'title'         => 'Sample task A',
+                            'category'      => 'Backend',
+                            'milestone'     => 'v1.0',
+                            'workStarted'   => null,
+                            'workCompleted' => null,
+                            'timeSpent'     => 0.0,
+                        ],
+                        [
+                            'title'         => 'Sample task B',
+                            'category'      => 'Design',
+                            'milestone'     => 'v1.1',
+                            'workStarted'   => null,
+                            'workCompleted' => null,
+                            'timeSpent'     => 0.0,
+                        ],
                     ],
                 ],
                 [
@@ -54,7 +68,14 @@ final class Api
                     'title'     => 'In Progress',
                     'discarded' => false,
                     'cards'     => [
-                        ['title' => 'Sample task C', 'category' => 'Frontend', 'timeSpent' => 2.5],
+                        [
+                            'title'         => 'Sample task C',
+                            'category'      => 'Frontend',
+                            'milestone'     => 'v1.0',
+                            'workStarted'   => '2026-04-10',
+                            'workCompleted' => null,
+                            'timeSpent'     => 2.5,
+                        ],
                     ],
                 ],
                 [
@@ -62,8 +83,22 @@ final class Api
                     'title'     => 'Done',
                     'discarded' => false,
                     'cards'     => [
-                        ['title' => 'Sample task D', 'category' => 'DevOps',        'timeSpent' => 4.0],
-                        ['title' => 'Sample task E', 'category' => 'Documentation', 'timeSpent' => 1.5],
+                        [
+                            'title'         => 'Sample task D',
+                            'category'      => 'DevOps',
+                            'milestone'     => 'v0.9',
+                            'workStarted'   => '2026-03-28',
+                            'workCompleted' => '2026-04-02',
+                            'timeSpent'     => 4.0,
+                        ],
+                        [
+                            'title'         => 'Sample task E',
+                            'category'      => 'Documentation',
+                            'milestone'     => 'v0.9',
+                            'workStarted'   => '2026-04-01',
+                            'workCompleted' => '2026-04-05',
+                            'timeSpent'     => 1.5,
+                        ],
                     ],
                 ],
                 [
@@ -71,7 +106,14 @@ final class Api
                     'title'     => 'Discarded',
                     'discarded' => true,
                     'cards'     => [
-                        ['title' => 'Sample task F', 'category' => 'Backend', 'timeSpent' => 1.0],
+                        [
+                            'title'         => 'Sample task F',
+                            'category'      => 'Backend',
+                            'milestone'     => 'v1.0',
+                            'workStarted'   => '2026-04-03',
+                            'workCompleted' => null,
+                            'timeSpent'     => 1.0,
+                        ],
                     ],
                 ],
             ],

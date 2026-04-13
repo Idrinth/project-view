@@ -80,6 +80,13 @@
         return Number(value).toFixed(1);
     }
 
+    function dateOrDash(value) {
+        if (!value) {
+            return document.createTextNode('\u2014');
+        }
+        return el('time', { datetime: value, text: value });
+    }
+
     var renderers = {
         kanban: function (container, data) {
             var columns = (data && data.columns) || [];
@@ -92,6 +99,9 @@
                     section.appendChild(el('article', { className: 'kanban-card' }, [
                         el('h4', { text: card.title }),
                         el('p', { className: 'kanban-meta', text: 'Category: ' + card.category }),
+                        el('p', { className: 'kanban-meta', text: 'Milestone: ' + (card.milestone || '\u2014') }),
+                        el('p', { className: 'kanban-meta' }, ['Work started: ', dateOrDash(card.workStarted)]),
+                        el('p', { className: 'kanban-meta' }, ['Work completed: ', dateOrDash(card.workCompleted)]),
                         el('p', {
                             className: 'kanban-meta kanban-time',
                             text: 'Time spent: ' + formatHours(card.timeSpent) + 'h'
