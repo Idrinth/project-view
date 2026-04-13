@@ -117,6 +117,73 @@ final class Users
         ]);
     }
 
+    /**
+     * Replace the free-form profile fields (display name, website URL,
+     * about blurb). Each argument is the trimmed value the API
+     * received; pass the empty string to clear a field. The avatar
+     * lives on setAvatar() / clearAvatar() because it is binary and
+     * has its own validation.
+     */
+    public function updateProfile(
+        int $id,
+        string $displayName,
+        string $websiteUrl,
+        string $about
+    ): void {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE users
+             SET display_name = :display_name,
+                 website_url  = :website_url,
+                 about        = :about,
+                 updated_at   = :updated_at
+             WHERE id = :id'
+        );
+        $stmt->execute([
+            'id'           => $id,
+            'display_name' => $displayName === '' ? null : $displayName,
+            'website_url'  => $websiteUrl  === '' ? null : $websiteUrl,
+            'about'        => $about       === '' ? null : $about,
+            'updated_at'   => gmdate('c'),
+        ]);
+    }
+
+    /**
+     * Store the avatar as base64-encoded bytes alongside its MIME
+     * type. Bytes live in the database rather than on disk so the
+     * build step (which wipes public/) cannot strand uploads.
+     */
+    public function setAvatar(int $id, string $mime, string $base64): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE users
+             SET avatar_mime = :mime,
+                 avatar_data = :data,
+                 updated_at  = :updated_at
+             WHERE id = :id'
+        );
+        $stmt->execute([
+            'id'         => $id,
+            'mime'       => $mime,
+            'data'       => $base64,
+            'updated_at' => gmdate('c'),
+        ]);
+    }
+
+    public function clearAvatar(int $id): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE users
+             SET avatar_mime = NULL,
+                 avatar_data = NULL,
+                 updated_at  = :updated_at
+             WHERE id = :id'
+        );
+        $stmt->execute([
+            'id'         => $id,
+            'updated_at' => gmdate('c'),
+        ]);
+    }
+
     public function delete(int $id): void
     {
         $stmt = $this->db->pdo()->prepare('DELETE FROM users WHERE id = :id');

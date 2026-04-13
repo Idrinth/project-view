@@ -155,6 +155,15 @@ final class Database
         // built the index from schema().
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_time_entries_user ON time_entries(user_id)');
 
+        // Add the self-service profile columns on older installs. Each
+        // column is nullable so historical rows stay valid; new fields
+        // show up empty until the user edits their profile.
+        foreach (['display_name', 'website_url', 'about', 'avatar_mime', 'avatar_data'] as $column) {
+            if (!$this->hasColumn('users', $column)) {
+                $this->pdo->exec('ALTER TABLE users ADD COLUMN ' . $column . ' TEXT NULL');
+            }
+        }
+
         // Collapse the legacy split 'waiting-external' / 'waiting-internal'
         // statuses into a single 'waiting' status. Older installs have
         // rows tagged with the old values; the kanban only renders one
@@ -296,10 +305,21 @@ final class Database
             // produced with PHP's password_hash() (bcrypt / argon2)
             // and verified with password_verify(). Managed from the
             // CLI with bin/users.php.
+            // The optional profile columns (display_name, website_url,
+            // about, avatar_mime, avatar_data) hold the self-service
+            // profile a signed-in user can edit from profile.html. The
+            // avatar image is stored inline as base64 text alongside
+            // its MIME type so the build step (which wipes public/)
+            // cannot strand uploaded files on disk.
             "CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
+                display_name TEXT NULL,
+                website_url TEXT NULL,
+                about TEXT NULL,
+                avatar_mime TEXT NULL,
+                avatar_data TEXT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )",
