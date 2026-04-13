@@ -1720,6 +1720,40 @@ final class Api
             $hoursByMilestone[(int) $hoursRow['scope_id']] = (float) $hoursRow['hours'];
         }
 
+        // Pull per-contributor hour totals for every released milestone
+        // in a single query so the per-release contributor list can be
+        // rendered without an N+1 lookup. The LEFT JOIN on users keeps
+        // entries whose author row was deleted visible — their username
+        // comes back NULL and the frontend falls back to showing the
+        // bare user id.
+        $contribStmt = $this->db->pdo()->query(
+            'SELECT i.milestone_id AS milestone_id,
+                    te.user_id     AS user_id,
+                    u.username     AS username,
+                    u.display_name AS display_name,
+                    SUM(te.hours)  AS hours
+               FROM time_entries te
+               JOIN issues i     ON i.id = te.issue_id
+               JOIN milestones m ON m.id = i.milestone_id
+               LEFT JOIN users u ON u.id = te.user_id
+              WHERE m.released_at IS NOT NULL
+                AND i.milestone_id IS NOT NULL
+           GROUP BY i.milestone_id, te.user_id, u.username, u.display_name
+           ORDER BY hours DESC, u.username ASC'
+        );
+        /** @var list<array<string, mixed>> $contribRows */
+        $contribRows = $contribStmt === false ? [] : $contribStmt->fetchAll();
+        $contributorsByMilestone = [];
+        foreach ($contribRows as $contribRow) {
+            $milestoneId = (int) $contribRow['milestone_id'];
+            $contributorsByMilestone[$milestoneId][] = [
+                'userId'      => (int) $contribRow['user_id'],
+                'username'    => $contribRow['username'] !== null ? (string) $contribRow['username'] : null,
+                'displayName' => $contribRow['display_name'] !== null ? (string) $contribRow['display_name'] : null,
+                'hours'       => (float) $contribRow['hours'],
+            ];
+        }
+
         $paths = $this->projects->allPaths();
 
         $projects = [];
@@ -1737,11 +1771,12 @@ final class Api
                 ];
             }
             $projects[$key]['releases'][] = [
-                'version'    => (string) $row['milestone_name'],
-                'date'       => (string) $row['released_at'],
-                'notes'      => $row['notes'] !== null ? (string) $row['notes'] : '',
-                'issues'     => $issuesByMilestone[$milestoneId] ?? [],
-                'totalHours' => $hoursByMilestone[$milestoneId] ?? 0.0,
+                'version'      => (string) $row['milestone_name'],
+                'date'         => (string) $row['released_at'],
+                'notes'        => $row['notes'] !== null ? (string) $row['notes'] : '',
+                'issues'       => $issuesByMilestone[$milestoneId] ?? [],
+                'totalHours'   => $hoursByMilestone[$milestoneId] ?? 0.0,
+                'contributors' => $contributorsByMilestone[$milestoneId] ?? [],
             ];
         }
 
