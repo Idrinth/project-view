@@ -693,8 +693,7 @@
         var statusOptions = [
             { value: 'todo', label: 'Todo' },
             { value: 'in-progress', label: 'In Progress' },
-            { value: 'waiting-external', label: 'Waiting for external' },
-            { value: 'waiting-internal', label: 'Waiting for internal' },
+            { value: 'waiting', label: 'Waiting' },
             { value: 'done', label: 'Done' },
             { value: 'discarded', label: 'Discarded' }
         ];
@@ -1468,7 +1467,7 @@
                 if (column.discarded) {
                     classes += ' kanban-column-discarded';
                 }
-                if (column.id === 'waiting-external' || column.id === 'waiting-internal') {
+                if (column.id === 'waiting') {
                     classes += ' kanban-column-waiting';
                 }
                 var section = el('section', { className: classes });

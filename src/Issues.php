@@ -13,19 +13,17 @@ require_once __DIR__ . '/Database.php';
 
 final class Issues
 {
-    public const STATUS_TODO             = 'todo';
-    public const STATUS_IN_PROGRESS      = 'in-progress';
-    public const STATUS_WAITING_EXTERNAL = 'waiting-external';
-    public const STATUS_WAITING_INTERNAL = 'waiting-internal';
-    public const STATUS_DONE             = 'done';
-    public const STATUS_DISCARDED        = 'discarded';
+    public const STATUS_TODO        = 'todo';
+    public const STATUS_IN_PROGRESS = 'in-progress';
+    public const STATUS_WAITING     = 'waiting';
+    public const STATUS_DONE        = 'done';
+    public const STATUS_DISCARDED   = 'discarded';
 
     /** @var list<string> */
     public const STATUSES = [
         self::STATUS_TODO,
         self::STATUS_IN_PROGRESS,
-        self::STATUS_WAITING_EXTERNAL,
-        self::STATUS_WAITING_INTERNAL,
+        self::STATUS_WAITING,
         self::STATUS_DONE,
         self::STATUS_DISCARDED,
     ];

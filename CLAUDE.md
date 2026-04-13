@@ -114,15 +114,14 @@ alongside it in `src/`:
   refer to the same rows.
 - `issues` (`src/Issues.php`) - tasks aka the cards on the kanban
   board. Reference a project and optionally a milestone; `status` is
-  one of `todo` / `in-progress` / `waiting-external` /
-  `waiting-internal` / `done` / `discarded`.
+  one of `todo` / `in-progress` / `waiting` / `done` / `discarded`.
 - `issue_links` (`src/IssueLinks.php`) - dependency graph between
   issues. Each row records that one issue is blocked by another;
   the inverse direction (the blocker "blocks" the blocked issue) is
-  implied by the same row. Used by the "Waiting for internal"
-  column so cards paused on another task can point at the blocker.
-  The API rejects self-links, duplicate pairs and additions that
-  would close a cycle in the graph.
+  implied by the same row. Used by the "Waiting" column so cards
+  paused on another task can point at the blocker. The API rejects
+  self-links, duplicate pairs and additions that would close a
+  cycle in the graph.
 - `time_entries` (`src/TimeEntries.php`) - raw time tracking rows:
   hours spent on an issue on a given date, optionally tagged with a
   work category (e.g. Development, Testing, Research).
@@ -142,8 +141,8 @@ matching JSON payload from the PHP API on load and renders it. The API
 currently returns example data only.
 
 - `index.html` - overview / landing page with links to the three views
-- `kanban.html` - Todo / In Progress / Waiting for external /
-  Waiting for internal / Done / Discarded board (`/kanban`)
+- `kanban.html` - Todo / In Progress / Waiting / Done / Discarded
+  board (`/kanban`)
 - `releases.html` - grid of tracked projects with their historical
   version releases (`/releases`)
 - `time.html` - weekly breakdown of tracked hours per issue and
