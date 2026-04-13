@@ -947,3 +947,13 @@ body.kanban-modal-open {
     font-weight: 600;
     color: #1f2933;
 }
+
+.time-issue-link {
+    color: #1f6feb;
+    text-decoration: none;
+}
+
+.time-issue-link:hover,
+.time-issue-link:focus {
+    text-decoration: underline;
+}

@@ -1670,7 +1670,17 @@
                 var grandTotal = 0;
 
                 (week.issues || []).forEach(function (issue) {
-                    var row = el('tr', null, [el('th', { scope: 'row', text: issue.label })]);
+                    var labelCell = el('th', { scope: 'row' });
+                    if (issue.id != null) {
+                        labelCell.appendChild(el('a', {
+                            className: 'time-issue-link',
+                            href: 'kanban.html#issue-' + issue.id,
+                            text: issue.label
+                        }));
+                    } else {
+                        labelCell.textContent = issue.label;
+                    }
+                    var row = el('tr', null, [labelCell]);
                     var rowTotal = 0;
                     var hours = issue.hours || [];
                     for (var i = 0; i < categories.length; i++) {

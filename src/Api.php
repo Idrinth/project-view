@@ -1113,6 +1113,7 @@ final class Api
             $issueId = (int) $entry['issue_id'];
             if (!isset($weeks[$weekStart]['issues'][$issueId])) {
                 $weeks[$weekStart]['issues'][$issueId] = [
+                    'id'    => $issueId,
                     'label' => '#' . $issueId . ' ' . (string) $entry['title'],
                     'hours' => array_fill(0, count($categories), 0.0),
                 ];
