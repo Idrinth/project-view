@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kanban - Project View</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header class="site-header">
+        <h1>Project View</h1>
+        <nav class="main-nav">
+            <a href="index.html">Overview</a>
+            <a href="kanban.html" class="active">Kanban</a>
+            <a href="roadmap.html">Roadmap</a>
+            <a href="time.html">Time Tracking</a>
+        </nav>
+    </header>
+    <main class="container">
+        <h2>Kanban Board</h2>
+        <div class="kanban">
+            <section class="kanban-column">
+                <h3 class="kanban-title">Todo</h3>
+                <article class="kanban-card">
+                    <h4>Sample task A</h4>
+                    <p class="kanban-meta">Category: Backend</p>
+                </article>
+                <article class="kanban-card">
+                    <h4>Sample task B</h4>
+                    <p class="kanban-meta">Category: Design</p>
+                </article>
+            </section>
+            <section class="kanban-column">
+                <h3 class="kanban-title">In Progress</h3>
+                <article class="kanban-card">
+                    <h4>Sample task C</h4>
+                    <p class="kanban-meta">Category: Frontend</p>
+                </article>
+            </section>
+            <section class="kanban-column">
+                <h3 class="kanban-title">Done</h3>
+                <article class="kanban-card">
+                    <h4>Sample task D</h4>
+                    <p class="kanban-meta">Category: DevOps</p>
+                </article>
+                <article class="kanban-card">
+                    <h4>Sample task E</h4>
+                    <p class="kanban-meta">Category: Documentation</p>
+                </article>
+            </section>
+        </div>
+    </main>
+    <footer class="site-footer">
+        <p>&copy; Project View</p>
+    </footer>
+    <script src="main.js"></script>
+</body>
+</html>

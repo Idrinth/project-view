@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Time Tracking - Project View</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header class="site-header">
+        <h1>Project View</h1>
+        <nav class="main-nav">
+            <a href="index.html">Overview</a>
+            <a href="kanban.html">Kanban</a>
+            <a href="roadmap.html">Roadmap</a>
+            <a href="time.html" class="active">Time Tracking</a>
+        </nav>
+    </header>
+    <main class="container">
+        <h2>Tracked Time</h2>
+        <p class="muted">Hours logged per day and task category.</p>
+        <div class="table-wrap">
+            <table class="time-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Day</th>
+                        <th scope="col">Backend</th>
+                        <th scope="col">Frontend</th>
+                        <th scope="col">Design</th>
+                        <th scope="col">DevOps</th>
+                        <th scope="col">Documentation</th>
+                        <th scope="col">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <th scope="row">Mon</th>
+                        <td>2.0</td>
+                        <td>1.5</td>
+                        <td>0.5</td>
+                        <td>0.0</td>
+                        <td>0.5</td>
+                        <td class="total">4.5</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Tue</th>
+                        <td>3.0</td>
+                        <td>2.0</td>
+                        <td>0.0</td>
+                        <td>1.0</td>
+                        <td>0.0</td>
+                        <td class="total">6.0</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Wed</th>
+                        <td>1.0</td>
+                        <td>3.5</td>
+                        <td>1.0</td>
+                        <td>0.5</td>
+                        <td>0.5</td>
+                        <td class="total">6.5</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Thu</th>
+                        <td>2.5</td>
+                        <td>2.5</td>
+                        <td>0.0</td>
+                        <td>0.0</td>
+                        <td>1.0</td>
+                        <td class="total">6.0</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Fri</th>
+                        <td>1.5</td>
+                        <td>1.0</td>
+                        <td>2.0</td>
+                        <td>0.5</td>
+                        <td>0.5</td>
+                        <td class="total">5.5</td>
+                    </tr>
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <th scope="row">Total</th>
+                        <td>10.0</td>
+                        <td>10.5</td>
+                        <td>3.5</td>
+                        <td>2.0</td>
+                        <td>2.5</td>
+                        <td class="total">28.5</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </main>
+    <footer class="site-footer">
+        <p>&copy; Project View</p>
+    </footer>
+    <script src="main.js"></script>
+</body>
+</html>

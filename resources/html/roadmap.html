@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Roadmap - Project View</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header class="site-header">
+        <h1>Project View</h1>
+        <nav class="main-nav">
+            <a href="index.html">Overview</a>
+            <a href="kanban.html">Kanban</a>
+            <a href="roadmap.html" class="active">Roadmap</a>
+            <a href="time.html">Time Tracking</a>
+        </nav>
+    </header>
+    <main class="container">
+        <h2>Roadmap</h2>
+        <ol class="roadmap">
+            <li class="roadmap-item done">
+                <span class="roadmap-date">Q1</span>
+                <div class="roadmap-body">
+                    <h3>Project skeleton</h3>
+                    <p>Set up folder structure, static pages and build pipeline.</p>
+                </div>
+            </li>
+            <li class="roadmap-item active">
+                <span class="roadmap-date">Q2</span>
+                <div class="roadmap-body">
+                    <h3>Backend API</h3>
+                    <p>Implement data storage and endpoints for tasks and tracked time.</p>
+                </div>
+            </li>
+            <li class="roadmap-item">
+                <span class="roadmap-date">Q3</span>
+                <div class="roadmap-body">
+                    <h3>Interactive UI</h3>
+                    <p>Wire up frontend to the API, add drag and drop on the Kanban board.</p>
+                </div>
+            </li>
+            <li class="roadmap-item">
+                <span class="roadmap-date">Q4</span>
+                <div class="roadmap-body">
+                    <h3>Public sharing</h3>
+                    <p>Allow publishing progress reports to external audiences.</p>
+                </div>
+            </li>
+        </ol>
+    </main>
+    <footer class="site-footer">
+        <p>&copy; Project View</p>
+    </footer>
+    <script src="main.js"></script>
+</body>
+</html>
