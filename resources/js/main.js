@@ -603,6 +603,12 @@
                 el('time', { datetime: latest.date, text: latest.date })
             ]));
         }
+        if (typeof project.totalHours === 'number' && project.totalHours > 0) {
+            headerChildren.push(el('p', { className: 'release-project-total' }, [
+                'Total time: ',
+                el('strong', { text: formatHours(project.totalHours) + 'h' })
+            ]));
+        }
 
         var list = el('ol', { className: 'release-list' });
         releases.forEach(function (release) {
@@ -612,9 +618,15 @@
                     className: 'release-date',
                     datetime: release.date,
                     text: release.date
-                }),
-                el('p', { className: 'release-notes', text: release.notes })
+                })
             ];
+            if (typeof release.totalHours === 'number' && release.totalHours > 0) {
+                releaseChildren.push(el('span', {
+                    className: 'release-time',
+                    text: formatHours(release.totalHours) + 'h'
+                }));
+            }
+            releaseChildren.push(el('p', { className: 'release-notes', text: release.notes }));
             var issues = Array.isArray(release.issues) ? release.issues : [];
             if (issues.length > 0) {
                 var issuesList = el('ul', { className: 'release-issues' });

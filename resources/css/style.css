@@ -990,6 +990,12 @@ body.kanban-modal-open {
     color: var(--color-text-subtle);
 }
 
+.release-project-total {
+    margin: 0.1rem 0 0;
+    font-size: 0.8rem;
+    color: var(--color-text-subtle);
+}
+
 .release-list {
     list-style: none;
     padding: 0;
@@ -1021,6 +1027,12 @@ body.kanban-modal-open {
 }
 
 .release-date {
+    font-size: 0.8rem;
+    color: var(--color-text-subtle);
+}
+
+.release-time {
+    margin-left: 0.5rem;
     font-size: 0.8rem;
     color: var(--color-text-subtle);
 }

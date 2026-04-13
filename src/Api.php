@@ -1032,7 +1032,10 @@ final class Api
      *
      * Every project carries its full `path` breadcrumb so the
      * frontend can group projects under their umbrella categories
-     * ("Mods", "Open Source", ...).
+     * ("Mods", "Open Source", ...). Each release carries the
+     * cross-category total hours logged against the issues tied to
+     * it (from the `time_aggregates` cache); the project carries the
+     * sum of those totals across all its releases.
      *
      * @return array<string, mixed>
      */
@@ -1075,6 +1078,26 @@ final class Api
             ];
         }
 
+        // Pull the cross-category total hours for every milestone in a
+        // single query and key them by milestone id. Milestones with no
+        // logged time simply won't be in this map and are treated as 0.
+        $hoursStmt = $this->db->pdo()->prepare(
+            "SELECT scope_id, hours FROM time_aggregates
+              WHERE scope = :scope
+                AND period_length = :period
+                AND period_start = ''
+                AND category = :category"
+        );
+        $hoursStmt->execute([
+            'scope'    => TimeAggregates::SCOPE_MILESTONE,
+            'period'   => TimeAggregates::PERIOD_TOTAL,
+            'category' => TimeAggregates::CATEGORY_ALL,
+        ]);
+        $hoursByMilestone = [];
+        foreach ($hoursStmt->fetchAll() as $hoursRow) {
+            $hoursByMilestone[(int) $hoursRow['scope_id']] = (float) $hoursRow['hours'];
+        }
+
         $paths = $this->projects->allPaths();
 
         $projects = [];
@@ -1092,11 +1115,23 @@ final class Api
                 ];
             }
             $projects[$key]['releases'][] = [
-                'version' => (string) $row['milestone_name'],
-                'date'    => (string) $row['released_at'],
-                'notes'   => $row['notes'] !== null ? (string) $row['notes'] : '',
-                'issues'  => $issuesByMilestone[$milestoneId] ?? [],
+                'version'    => (string) $row['milestone_name'],
+                'date'       => (string) $row['released_at'],
+                'notes'      => $row['notes'] !== null ? (string) $row['notes'] : '',
+                'issues'     => $issuesByMilestone[$milestoneId] ?? [],
+                'totalHours' => $hoursByMilestone[$milestoneId] ?? 0.0,
             ];
+        }
+
+        // Per-project totals: sum the milestone totals so the UI can
+        // surface "total time spent across every release" without the
+        // frontend having to re-add the per-release figures itself.
+        foreach ($projects as $key => $project) {
+            $total = 0.0;
+            foreach ($project['releases'] as $release) {
+                $total += (float) $release['totalHours'];
+            }
+            $projects[$key]['totalHours'] = $total;
         }
 
         return ['projects' => array_values($projects)];
