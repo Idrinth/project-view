@@ -37,8 +37,7 @@
         }
         Promise.all([fetchEndpoint(view), userPromise])
             .then(function (results) {
-                clear(container);
-                renderer(container, results[0], { user: results[1] });
+                initFilteredView(container, view, renderer, results[0], { user: results[1] });
             })
             .catch(function (err) {
                 clear(container);
@@ -48,6 +47,138 @@
                 container.appendChild(msg);
             });
     });
+
+    // Wire up the optional category filter bar (if the page includes
+    // one) and render the view. The data is fetched once and filtered
+    // in-memory so the user can type freely without hitting the API
+    // again. Views that don't carry category information (e.g. time)
+    // fall through untouched.
+    function initFilteredView(container, view, renderer, data, options) {
+        var filterInput = document.querySelector('[data-category-filter]');
+        var clearBtn = document.querySelector('[data-category-filter-clear]');
+
+        function render() {
+            var filter = filterInput ? parseCategoryFilter(filterInput.value) : [];
+            var viewData = applyCategoryFilter(view, data, filter);
+            clear(container);
+            renderer(container, viewData, options);
+        }
+
+        if (filterInput) {
+            filterInput.addEventListener('input', render);
+        }
+        if (clearBtn) {
+            clearBtn.addEventListener('click', function () {
+                if (filterInput && filterInput.value !== '') {
+                    filterInput.value = '';
+                    render();
+                }
+            });
+        }
+
+        render();
+    }
+
+    // Split a user-typed path like "Mods / Skyrim" into trimmed,
+    // non-empty segments. Extra slashes and whitespace are ignored so
+    // "mods//skyrim" and " mods / skyrim " both yield ["mods","skyrim"].
+    function parseCategoryFilter(value) {
+        if (!value) {
+            return [];
+        }
+        return String(value).split('/').map(function (segment) {
+            return segment.trim();
+        }).filter(function (segment) {
+            return segment.length > 0;
+        });
+    }
+
+    // Prefix-match an item's category path against the filter: every
+    // filter segment must equal the corresponding segment of the item
+    // path (case-insensitive), and the item may have extra deeper
+    // segments. That way filtering by "cat/abc" also keeps items at
+    // "cat/abc/def".
+    function matchesCategoryFilter(path, filter) {
+        if (!filter.length) {
+            return true;
+        }
+        if (!path || path.length < filter.length) {
+            return false;
+        }
+        for (var i = 0; i < filter.length; i++) {
+            var itemSeg = String(path[i] == null ? '' : path[i]).toLowerCase();
+            var filterSeg = String(filter[i]).toLowerCase();
+            if (itemSeg !== filterSeg) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    function cardCategoryPath(card) {
+        if (Array.isArray(card.categoryPath)) {
+            return card.categoryPath;
+        }
+        if (card.category) {
+            return [card.category];
+        }
+        return [];
+    }
+
+    function projectCategoryPath(project) {
+        if (Array.isArray(project.path)) {
+            return project.path;
+        }
+        if (project.name) {
+            return [project.name];
+        }
+        return [];
+    }
+
+    function applyCategoryFilter(view, data, filter) {
+        if (!filter.length) {
+            return data;
+        }
+        if (view === 'kanban') {
+            return filterKanbanData(data, filter);
+        }
+        if (view === 'releases') {
+            return filterReleasesData(data, filter);
+        }
+        return data;
+    }
+
+    function filterKanbanData(data, filter) {
+        if (!data || !Array.isArray(data.columns)) {
+            return data;
+        }
+        var columns = data.columns.map(function (column) {
+            var cards = (column.cards || []).filter(function (card) {
+                return matchesCategoryFilter(cardCategoryPath(card), filter);
+            });
+            var copy = {};
+            Object.keys(column).forEach(function (key) { copy[key] = column[key]; });
+            copy.cards = cards;
+            return copy;
+        });
+        var result = {};
+        Object.keys(data).forEach(function (key) { result[key] = data[key]; });
+        result.columns = columns;
+        return result;
+    }
+
+    function filterReleasesData(data, filter) {
+        if (!data || !Array.isArray(data.projects)) {
+            return data;
+        }
+        var projects = data.projects.filter(function (project) {
+            return matchesCategoryFilter(projectCategoryPath(project), filter);
+        });
+        var result = {};
+        Object.keys(data).forEach(function (key) { result[key] = data[key]; });
+        result.projects = projects;
+        return result;
+    }
 
     // Populate the nav user-menu slot based on the resolved auth state.
     function renderUserMenu(name) {

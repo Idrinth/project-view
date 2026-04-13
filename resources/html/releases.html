@@ -20,6 +20,11 @@
     <main class="container">
         <h2>Releases</h2>
         <p class="muted">Historical version releases across all tracked projects.</p>
+        <div class="category-filter">
+            <label class="category-filter-label" for="category-filter-input">Filter by category</label>
+            <input type="text" id="category-filter-input" data-category-filter placeholder="e.g. Mods / Skyrim">
+            <button type="button" class="category-filter-clear" data-category-filter-clear>Clear</button>
+        </div>
         <div class="releases" data-view="releases">
             <p class="muted" data-loading>Loading releases&hellip;</p>
         </div>
