@@ -6,3 +6,7 @@
 # -journal, -wal and -shm sidecar files SQLite writes alongside it.
 /config/*.sqlite
 /config/*.sqlite-*
+
+# Uploaded comment attachments (images, video, audio). Created on
+# demand by the API when a comment is posted with media.
+/config/uploads/

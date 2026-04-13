@@ -492,6 +492,10 @@
     // session cookie so the backend can identify the caller. The
     // returned promise rejects with an Error whose .message is the
     // server-supplied error string (or "HTTP <status>" as a fallback).
+    //
+    // If `body` is a FormData instance (used for file uploads) it is
+    // sent verbatim and the browser picks the multipart boundary;
+    // plain objects are JSON-encoded as before.
     function apiRequest(method, endpoint, body) {
         var options = {
             method: method,
@@ -499,8 +503,12 @@
             headers: { 'Accept': 'application/json' }
         };
         if (body !== undefined) {
-            options.headers['Content-Type'] = 'application/json';
-            options.body = JSON.stringify(body);
+            if (typeof FormData !== 'undefined' && body instanceof FormData) {
+                options.body = body;
+            } else {
+                options.headers['Content-Type'] = 'application/json';
+                options.body = JSON.stringify(body);
+            }
         }
         return fetch(API_BASE + encodeURIComponent(endpoint), options)
             .then(function (response) {
@@ -1290,8 +1298,26 @@
         var form = el('form', { className: 'detail-form' });
         var bodyInput = el('textarea', {
             rows: '3',
-            required: 'required',
             placeholder: 'Leave a comment\u2026'
+        });
+        // Accept multiple images, videos or audio clips. The `accept`
+        // attribute hints to the browser's file picker; the server
+        // re-validates the mime type on every upload, so users that
+        // bypass the hint still get a clean 400 rather than something
+        // unexpected in the DB. The list is kept in sync with the
+        // server-side whitelist in CommentAttachments::MIME_KINDS so
+        // the picker only surfaces files the server will accept.
+        var acceptedMimes = [
+            'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif',
+            'video/mp4', 'video/webm', 'video/ogg',
+            'audio/mpeg', 'audio/mp3', 'audio/ogg', 'audio/wav',
+            'audio/webm', 'audio/mp4', 'audio/aac', 'audio/flac'
+        ];
+        var fileInput = el('input', {
+            type: 'file',
+            multiple: 'multiple',
+            accept: acceptedMimes.join(','),
+            className: 'detail-file-input'
         });
         var submitBtn = el('button', {
             type: 'submit',
@@ -1302,6 +1328,7 @@
         var errorNode = el('p', { className: 'detail-error', hidden: 'hidden' });
 
         form.appendChild(field('Comment', bodyInput, true));
+        form.appendChild(field('Attachments (images, video, audio)', fileInput, true));
         form.appendChild(el('div', { className: 'detail-actions' }, [submitBtn, statusNode]));
         form.appendChild(errorNode);
 
@@ -1310,23 +1337,47 @@
             errorNode.hidden = true;
             errorNode.textContent = '';
             var text = bodyInput.value.trim();
-            if (!text) {
+            var files = fileInput.files ? Array.prototype.slice.call(fileInput.files) : [];
+            if (!text && files.length === 0) {
+                errorNode.textContent = 'Add a comment or attach at least one file.';
+                errorNode.hidden = false;
                 return;
             }
             submitBtn.disabled = true;
             statusNode.textContent = 'Posting\u2026';
-            apiRequest('POST', 'issue-comment-add', { id: issue.id, body: text })
+
+            // Send as multipart when files are attached so the browser
+            // streams them directly; fall back to plain JSON for
+            // text-only comments to keep the hot path cheap.
+            var payload;
+            if (files.length > 0) {
+                payload = new FormData();
+                payload.append('id', String(issue.id));
+                payload.append('body', text);
+                files.forEach(function (file) {
+                    payload.append('files[]', file, file.name);
+                });
+            } else {
+                payload = { id: issue.id, body: text };
+            }
+
+            apiRequest('POST', 'issue-comment-add', payload)
                 .then(function (result) {
                     submitBtn.disabled = false;
                     statusNode.textContent = 'Posted.';
                     var c = (result && result.comment) || {
                         author: '',
                         body: text,
-                        createdAt: new Date().toISOString()
+                        createdAt: new Date().toISOString(),
+                        attachments: []
                     };
+                    if (!c.attachments) {
+                        c.attachments = [];
+                    }
                     comments.push(c);
                     renderComments(listWrap, comments);
                     bodyInput.value = '';
+                    fileInput.value = '';
                 })
                 .catch(function (err) {
                     submitBtn.disabled = false;
@@ -1348,15 +1399,76 @@
         }
         var list = el('ul', { className: 'detail-comments' });
         comments.forEach(function (c) {
-            list.appendChild(el('li', { className: 'detail-comment' }, [
+            var item = el('li', { className: 'detail-comment' }, [
                 el('p', {
                     className: 'detail-comment-meta',
                     text: (c.author || 'unknown') + ' \u00b7 ' + (c.createdAt || '')
-                }),
-                el('p', { className: 'detail-comment-body', text: c.body || '' })
-            ]));
+                })
+            ]);
+            if (c.body) {
+                item.appendChild(el('p', { className: 'detail-comment-body', text: c.body }));
+            }
+            var attachments = c.attachments || [];
+            if (attachments.length) {
+                item.appendChild(renderCommentAttachments(attachments));
+            }
+            list.appendChild(item);
         });
         wrap.appendChild(list);
+    }
+
+    // Render a comment's media attachments. Each attachment is shown
+    // inline with the tag that matches its `kind` (image / video /
+    // audio); unknown kinds fall back to a plain download link so a
+    // future server-side addition never leaves a comment looking
+    // empty.
+    function renderCommentAttachments(attachments) {
+        var wrap = el('div', { className: 'detail-comment-attachments' });
+        attachments.forEach(function (att) {
+            var url = att.url || ('comment-attachment?id=' + att.id);
+            var name = att.originalName || 'attachment';
+            if (att.kind === 'image') {
+                var img = el('img', {
+                    className: 'detail-comment-media detail-comment-image',
+                    src: url,
+                    alt: name,
+                    loading: 'lazy'
+                });
+                var link = el('a', {
+                    href: url,
+                    target: '_blank',
+                    rel: 'noopener',
+                    className: 'detail-comment-media-link'
+                });
+                link.appendChild(img);
+                wrap.appendChild(link);
+            } else if (att.kind === 'video') {
+                var video = el('video', {
+                    className: 'detail-comment-media detail-comment-video',
+                    src: url,
+                    controls: 'controls',
+                    preload: 'metadata'
+                });
+                wrap.appendChild(video);
+            } else if (att.kind === 'audio') {
+                var audio = el('audio', {
+                    className: 'detail-comment-media detail-comment-audio',
+                    src: url,
+                    controls: 'controls',
+                    preload: 'metadata'
+                });
+                wrap.appendChild(audio);
+            } else {
+                wrap.appendChild(el('a', {
+                    href: url,
+                    target: '_blank',
+                    rel: 'noopener',
+                    className: 'detail-comment-download',
+                    text: name
+                }));
+            }
+        });
+        return wrap;
     }
 
     function field(labelText, input, full) {

@@ -842,6 +842,49 @@ body.kanban-modal-open {
     word-wrap: break-word;
 }
 
+.detail-comment-attachments {
+    margin-top: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.detail-comment-media {
+    max-width: 100%;
+    border-radius: 4px;
+    background: var(--color-surface);
+}
+
+.detail-comment-image {
+    max-height: 20rem;
+    object-fit: contain;
+    display: block;
+}
+
+.detail-comment-media-link {
+    display: inline-block;
+    line-height: 0;
+}
+
+.detail-comment-video,
+.detail-comment-audio {
+    width: 100%;
+}
+
+.detail-comment-download {
+    font-size: 0.85rem;
+    color: var(--color-accent);
+    text-decoration: underline;
+    word-break: break-all;
+}
+
+.detail-file-input {
+    font: inherit;
+    padding: 0.2rem 0;
+    color: var(--color-text);
+    background: transparent;
+}
+
 .detail-entry-note {
     margin: 0.2rem 0 0;
     color: var(--color-text-muted);

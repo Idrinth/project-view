@@ -446,6 +446,30 @@ final class Database
             )",
             "CREATE INDEX IF NOT EXISTS idx_comments_issue ON comments(issue_id)",
 
+            // Media attachments on comments: images, videos and audio
+            // clips that signed-in users upload alongside the comment
+            // body. `stored_name` is the on-disk filename in
+            // config/uploads/ (random, so users cannot guess other
+            // uploads); `original_name` is the user-supplied filename,
+            // kept purely for display in the UI. `kind` is the broad
+            // media class ('image' / 'video' / 'audio') so the frontend
+            // can pick the right tag without re-parsing mime_type.
+            // Deleting a comment cascades to its attachments; the
+            // on-disk files are cleaned up by the repository before the
+            // DB row goes away.
+            "CREATE TABLE IF NOT EXISTS comment_attachments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                comment_id INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                original_name TEXT NOT NULL,
+                stored_name TEXT NOT NULL UNIQUE,
+                size INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (comment_id) REFERENCES comments(id) ON DELETE CASCADE
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_comment_attachments_comment ON comment_attachments(comment_id)",
+
             // Issue dependency links. Each row says `issue_id` is
             // blocked by `blocked_by_id`. The inverse direction
             // (`blocked_by_id` blocks `issue_id`) is implied by the
