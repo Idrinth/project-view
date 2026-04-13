@@ -189,10 +189,20 @@ a:hover {
     border-radius: 8px;
 }
 
+.time-week + .time-week {
+    margin-top: 2rem;
+}
+
+.time-week-title {
+    margin: 0 0 0.75rem;
+    font-size: 1rem;
+    color: #52606d;
+}
+
 .time-table {
     width: 100%;
     border-collapse: collapse;
-    min-width: 600px;
+    min-width: 720px;
 }
 
 .time-table th,
