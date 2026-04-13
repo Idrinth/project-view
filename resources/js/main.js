@@ -577,12 +577,12 @@
         ];
     }
 
-    function buildCardEl(card, draggable) {
+    function buildCardEl(card, canEdit) {
         var cardEl = el('article', { className: 'kanban-card' }, buildCardChildren(card));
         if (card.id != null) {
             cardEl.setAttribute('data-card-id', String(card.id));
         }
-        if (draggable) {
+        if (canEdit) {
             makeDraggable(cardEl);
         }
         // Clicking a card opens the detail view. Skip the click when
@@ -598,14 +598,16 @@
             if (card.id == null) {
                 return;
             }
-            openDetailView(card.id, cardEl);
+            openDetailView(card.id, cardEl, canEdit);
         });
         return cardEl;
     }
 
     // Task detail modal. Shares one overlay (defined in kanban.html)
-    // across every card; each open() replaces its contents.
-    function openDetailView(issueId, cardEl) {
+    // across every card; each open() replaces its contents. `canEdit`
+    // controls whether the modal exposes any edit affordances - signed-out
+    // visitors get a read-only view of links, time entries and comments.
+    function openDetailView(issueId, cardEl, canEdit) {
         var overlay = document.querySelector('[data-detail-overlay]');
         var body = document.querySelector('[data-detail-body]');
         if (!overlay || !body) {
@@ -644,7 +646,7 @@
         apiRequest('POST', 'issue', { id: issueId })
             .then(function (data) {
                 clear(body);
-                renderDetailView(body, data, cardEl, close);
+                renderDetailView(body, data, cardEl, close, canEdit);
             })
             .catch(function (err) {
                 clear(body);
@@ -659,7 +661,10 @@
     // comments) into `container`. `cardEl` is the kanban card the user
     // clicked to open the view; it is updated in place when an edit
     // succeeds so the board reflects the change without a full reload.
-    function renderDetailView(container, data, cardEl, close) {
+    // When `canEdit` is false the edit form is omitted and the link,
+    // time and comment sections are rendered without their add/remove
+    // controls so non-authenticated viewers only get read-only data.
+    function renderDetailView(container, data, cardEl, close, canEdit) {
         var issue = data && data.issue ? data.issue : {};
         var timeEntries = (data && data.timeEntries) || [];
         var comments = (data && data.comments) || [];
@@ -668,15 +673,12 @@
 
         container.appendChild(el('h3', { id: 'detail-title', text: issue.title || 'Task' }));
 
-        var editSection = buildEditSection(issue, cardEl);
-        var linkSection = buildLinkSection(issue, blockedBy, blocks);
-        var timeSection = buildTimeSection(issue, timeEntries, cardEl);
-        var commentSection = buildCommentSection(issue, comments);
-
-        container.appendChild(editSection);
-        container.appendChild(linkSection);
-        container.appendChild(timeSection);
-        container.appendChild(commentSection);
+        if (canEdit) {
+            container.appendChild(buildEditSection(issue, cardEl));
+        }
+        container.appendChild(buildLinkSection(issue, blockedBy, blocks, canEdit));
+        container.appendChild(buildTimeSection(issue, timeEntries, cardEl, canEdit));
+        container.appendChild(buildCommentSection(issue, comments, canEdit));
     }
 
     function buildEditSection(issue, cardEl) {
@@ -787,8 +789,10 @@
     // Render the "Blocked by / Blocks" section of the detail modal:
     // two lists of linked issues plus a small form to add a new
     // "blocked by" link. Each row carries a remove button so the
-    // user can break the link without leaving the dialog.
-    function buildLinkSection(issue, blockedBy, blocks) {
+    // user can break the link without leaving the dialog. When
+    // `canEdit` is false the add-link form is omitted and the
+    // per-link remove buttons are not rendered.
+    function buildLinkSection(issue, blockedBy, blocks, canEdit) {
         var section = el('section', { className: 'detail-section' });
         section.appendChild(el('h4', { text: 'Links' }));
 
@@ -860,11 +864,15 @@
             wrap.appendChild(list);
         }
 
-        renderList(blockedByList, blockedBy, true);
+        renderList(blockedByList, blockedBy, canEdit);
         renderList(blocksList, blocks, false);
 
         section.appendChild(blockedByWrap);
         section.appendChild(blocksWrap);
+
+        if (!canEdit) {
+            return section;
+        }
 
         // Add-link form. Only "blocked by" is editable - the inverse
         // direction is implied and shown above. Issue ids accept "#42"
@@ -922,13 +930,17 @@
         return section;
     }
 
-    function buildTimeSection(issue, entries, cardEl) {
+    function buildTimeSection(issue, entries, cardEl, canEdit) {
         var section = el('section', { className: 'detail-section' });
         section.appendChild(el('h4', { text: 'Time spent' }));
 
         var listWrap = el('div');
         renderTimeEntries(listWrap, entries);
         section.appendChild(listWrap);
+
+        if (!canEdit) {
+            return section;
+        }
 
         var form = el('form', { className: 'detail-form' });
         var dateInput = el('input', { type: 'date', required: 'required' });
@@ -1036,13 +1048,17 @@
         wrap.appendChild(list);
     }
 
-    function buildCommentSection(issue, comments) {
+    function buildCommentSection(issue, comments, canEdit) {
         var section = el('section', { className: 'detail-section' });
         section.appendChild(el('h4', { text: 'Comments' }));
 
         var listWrap = el('div');
         renderComments(listWrap, comments);
         section.appendChild(listWrap);
+
+        if (!canEdit) {
+            return section;
+        }
 
         var form = el('form', { className: 'detail-form' });
         var bodyInput = el('textarea', {
