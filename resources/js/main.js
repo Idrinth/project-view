@@ -87,6 +87,150 @@
         return el('time', { datetime: value, text: value });
     }
 
+    var draggedCard = null;
+
+    function buildCardEl(card) {
+        var cardEl = el('article', { className: 'kanban-card' }, [
+            el('h4', { text: card.title }),
+            el('p', { className: 'kanban-meta', text: 'Category: ' + card.category }),
+            el('p', { className: 'kanban-meta', text: 'Milestone: ' + (card.milestone || '\u2014') }),
+            el('p', { className: 'kanban-meta' }, ['Work started: ', dateOrDash(card.workStarted)]),
+            el('p', { className: 'kanban-meta' }, ['Work completed: ', dateOrDash(card.workCompleted)]),
+            el('p', {
+                className: 'kanban-meta kanban-time',
+                text: 'Time spent: ' + formatHours(card.timeSpent) + 'h'
+            })
+        ]);
+        makeDraggable(cardEl);
+        return cardEl;
+    }
+
+    function makeDraggable(cardEl) {
+        cardEl.setAttribute('draggable', 'true');
+        cardEl.addEventListener('dragstart', function (e) {
+            draggedCard = cardEl;
+            cardEl.classList.add('kanban-card-dragging');
+            if (e.dataTransfer) {
+                e.dataTransfer.effectAllowed = 'move';
+                try { e.dataTransfer.setData('text/plain', ''); } catch (err) { /* ignore */ }
+            }
+        });
+        cardEl.addEventListener('dragend', function () {
+            cardEl.classList.remove('kanban-card-dragging');
+            draggedCard = null;
+        });
+    }
+
+    function findInsertBefore(cardListEl, y) {
+        var cards = cardListEl.querySelectorAll('.kanban-card:not(.kanban-card-dragging)');
+        for (var i = 0; i < cards.length; i++) {
+            var rect = cards[i].getBoundingClientRect();
+            if (y < rect.top + rect.height / 2) {
+                return cards[i];
+            }
+        }
+        return null;
+    }
+
+    function makeDropTarget(cardListEl) {
+        cardListEl.addEventListener('dragover', function (e) {
+            if (!draggedCard) {
+                return;
+            }
+            e.preventDefault();
+            if (e.dataTransfer) {
+                e.dataTransfer.dropEffect = 'move';
+            }
+            var before = findInsertBefore(cardListEl, e.clientY);
+            if (before == null) {
+                if (draggedCard.parentNode !== cardListEl || draggedCard.nextSibling !== null) {
+                    cardListEl.appendChild(draggedCard);
+                }
+            } else if (before !== draggedCard && before !== draggedCard.nextSibling) {
+                cardListEl.insertBefore(draggedCard, before);
+            }
+        });
+        cardListEl.addEventListener('drop', function (e) {
+            e.preventDefault();
+        });
+    }
+
+    function buildAddCardUi(cardListEl) {
+        var wrap = el('div', { className: 'kanban-add' });
+        var button = el('button', {
+            type: 'button',
+            className: 'kanban-add-button',
+            text: '+ Add card'
+        });
+        var form = el('form', { className: 'kanban-add-form', hidden: 'hidden' });
+        var titleInput = el('input', {
+            type: 'text',
+            placeholder: 'Title',
+            required: 'required',
+            className: 'kanban-add-input'
+        });
+        var categoryInput = el('input', {
+            type: 'text',
+            placeholder: 'Category',
+            className: 'kanban-add-input'
+        });
+        var milestoneInput = el('input', {
+            type: 'text',
+            placeholder: 'Milestone (optional)',
+            className: 'kanban-add-input'
+        });
+        var submitBtn = el('button', {
+            type: 'submit',
+            className: 'kanban-add-submit',
+            text: 'Add'
+        });
+        var cancelBtn = el('button', {
+            type: 'button',
+            className: 'kanban-add-cancel',
+            text: 'Cancel'
+        });
+        var actions = el('div', { className: 'kanban-add-actions' }, [submitBtn, cancelBtn]);
+        form.appendChild(titleInput);
+        form.appendChild(categoryInput);
+        form.appendChild(milestoneInput);
+        form.appendChild(actions);
+
+        function openForm() {
+            button.hidden = true;
+            form.hidden = false;
+            titleInput.focus();
+        }
+        function closeForm() {
+            form.reset();
+            form.hidden = true;
+            button.hidden = false;
+        }
+
+        button.addEventListener('click', openForm);
+        cancelBtn.addEventListener('click', closeForm);
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            var title = titleInput.value.trim();
+            if (!title) {
+                return;
+            }
+            var card = buildCardEl({
+                title: title,
+                category: categoryInput.value.trim() || 'Uncategorised',
+                milestone: milestoneInput.value.trim() || null,
+                workStarted: null,
+                workCompleted: null,
+                timeSpent: 0.0
+            });
+            cardListEl.appendChild(card);
+            closeForm();
+        });
+
+        wrap.appendChild(button);
+        wrap.appendChild(form);
+        return wrap;
+    }
+
     var renderers = {
         kanban: function (container, data) {
             var columns = (data && data.columns) || [];
@@ -95,19 +239,15 @@
                     className: 'kanban-column' + (column.discarded ? ' kanban-column-discarded' : '')
                 });
                 section.appendChild(el('h3', { className: 'kanban-title', text: column.title }));
+
+                var cardList = el('div', { className: 'kanban-cards' });
                 (column.cards || []).forEach(function (card) {
-                    section.appendChild(el('article', { className: 'kanban-card' }, [
-                        el('h4', { text: card.title }),
-                        el('p', { className: 'kanban-meta', text: 'Category: ' + card.category }),
-                        el('p', { className: 'kanban-meta', text: 'Milestone: ' + (card.milestone || '\u2014') }),
-                        el('p', { className: 'kanban-meta' }, ['Work started: ', dateOrDash(card.workStarted)]),
-                        el('p', { className: 'kanban-meta' }, ['Work completed: ', dateOrDash(card.workCompleted)]),
-                        el('p', {
-                            className: 'kanban-meta kanban-time',
-                            text: 'Time spent: ' + formatHours(card.timeSpent) + 'h'
-                        })
-                    ]));
+                    cardList.appendChild(buildCardEl(card));
                 });
+                makeDropTarget(cardList);
+                section.appendChild(cardList);
+                section.appendChild(buildAddCardUi(cardList));
+
                 container.appendChild(section);
             });
         },
