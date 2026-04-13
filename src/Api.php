@@ -164,7 +164,7 @@ final class Api
         ];
 
         $stmt = $this->db->pdo()->query(
-            'SELECT i.id, i.title, i.status, i.position,
+            'SELECT i.id, i.title, i.description, i.status, i.position,
                     i.work_started_at, i.work_completed_at,
                     p.id AS project_id,
                     m.name AS milestone_name
@@ -222,6 +222,7 @@ final class Api
             $columns[$status]['cards'][] = [
                 'id'            => $id,
                 'title'         => (string) $row['title'],
+                'description'   => $row['description'] !== null ? (string) $row['description'] : '',
                 'category'      => implode(self::CATEGORY_PATH_SEPARATOR, $path),
                 'categoryPath'  => $path,
                 'milestone'     => $row['milestone_name'] !== null ? (string) $row['milestone_name'] : null,
@@ -251,10 +252,11 @@ final class Api
         }
         $this->requireUser();
 
-        $status    = isset($body['column']) && is_string($body['column']) ? $body['column'] : '';
-        $title     = isset($body['title'])  && is_string($body['title'])  ? trim($body['title']) : '';
-        $category  = isset($body['category'])  && is_string($body['category'])  ? trim($body['category'])  : '';
-        $milestone = isset($body['milestone']) && is_string($body['milestone']) ? trim($body['milestone']) : '';
+        $status      = isset($body['column']) && is_string($body['column']) ? $body['column'] : '';
+        $title       = isset($body['title'])  && is_string($body['title'])  ? trim($body['title']) : '';
+        $description = isset($body['description']) && is_string($body['description']) ? trim($body['description']) : '';
+        $category    = isset($body['category'])  && is_string($body['category'])  ? trim($body['category'])  : '';
+        $milestone   = isset($body['milestone']) && is_string($body['milestone']) ? trim($body['milestone']) : '';
 
         if ($status === '' || $title === '') {
             throw new BadRequestException('column and title are required');
@@ -277,7 +279,10 @@ final class Api
             $projectId,
             $milestoneId,
             $title,
-            $status
+            $status,
+            null,
+            null,
+            $description !== '' ? $description : null
         );
         // Place the new card at the bottom of its column.
         $this->issues->setStatus($issueId, $status, $position);
@@ -287,6 +292,7 @@ final class Api
             'card' => [
                 'id'            => $issueId,
                 'title'         => $title,
+                'description'   => $description,
                 'category'      => implode(self::CATEGORY_PATH_SEPARATOR, $path),
                 'categoryPath'  => $path,
                 'milestone'     => $milestone !== '' ? $milestone : null,

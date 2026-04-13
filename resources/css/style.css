@@ -385,6 +385,25 @@ a:hover {
     font-size: 0.95rem;
 }
 
+.kanban-description {
+    margin: 0 0 0.5rem;
+    font-size: 0.85rem;
+    color: #1f2933;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.kanban-description-empty {
+    color: #9aa5b1;
+    font-style: italic;
+}
+
+.kanban-add-description {
+    font: inherit;
+    resize: vertical;
+    min-height: 3.5rem;
+}
+
 .kanban-meta {
     margin: 0;
     font-size: 0.8rem;
