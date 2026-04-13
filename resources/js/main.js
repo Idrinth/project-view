@@ -861,17 +861,15 @@
 
         container.appendChild(el('h3', { id: 'detail-title', text: issue.title || 'Task' }));
 
-        if (canEdit) {
-            container.appendChild(buildEditSection(issue, cardEl));
-        }
+        container.appendChild(buildEditSection(issue, cardEl, canEdit));
         container.appendChild(buildLinkSection(issue, blockedBy, blocks, canEdit));
         container.appendChild(buildTimeSection(issue, timeEntries, cardEl, canEdit));
         container.appendChild(buildCommentSection(issue, comments, canEdit));
     }
 
-    function buildEditSection(issue, cardEl) {
+    function buildEditSection(issue, cardEl, canEdit) {
         var section = el('section', { className: 'detail-section' });
-        section.appendChild(el('h4', { text: 'Edit' }));
+        section.appendChild(el('h4', { text: canEdit ? 'Edit' : 'Details' }));
 
         var form = el('form', { className: 'detail-form' });
         var titleInput = el('input', {
@@ -913,13 +911,19 @@
         var completedInput = el('input', { type: 'date' });
         completedInput.value = issue.workCompleted || '';
 
-        var submitBtn = el('button', {
-            type: 'submit',
-            className: 'detail-button',
-            text: 'Save'
-        });
-        var statusNode = el('p', { className: 'detail-status' });
-        var errorNode = el('p', { className: 'detail-error', hidden: 'hidden' });
+        if (!canEdit) {
+            // Viewers see the same fields so nothing disappears from
+            // the detail view, but every control is locked down.
+            // `readonly` keeps the value visible and selectable on
+            // text-like inputs; `<select>` only supports `disabled`.
+            titleInput.readOnly = true;
+            descriptionInput.readOnly = true;
+            categoryInput.readOnly = true;
+            milestoneInput.readOnly = true;
+            startedInput.readOnly = true;
+            completedInput.readOnly = true;
+            statusSelect.disabled = true;
+        }
 
         form.appendChild(field('Title', titleInput, true));
         form.appendChild(field('Status', statusSelect, false));
@@ -928,6 +932,20 @@
         form.appendChild(field('Work started', startedInput, false));
         form.appendChild(field('Work completed', completedInput, false));
         form.appendChild(field('Description', descriptionInput, true));
+
+        if (!canEdit) {
+            section.appendChild(form);
+            return section;
+        }
+
+        var submitBtn = el('button', {
+            type: 'submit',
+            className: 'detail-button',
+            text: 'Save'
+        });
+        var statusNode = el('p', { className: 'detail-status' });
+        var errorNode = el('p', { className: 'detail-error', hidden: 'hidden' });
+
         form.appendChild(el('div', { className: 'detail-actions' }, [submitBtn, statusNode]));
         form.appendChild(errorNode);
 
