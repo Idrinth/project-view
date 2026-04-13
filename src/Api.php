@@ -380,6 +380,13 @@ final class Api
             $this->issues->setWorkTimestamps($id, $workStarted, $workCompleted);
         }
 
+        // Auto-fill the milestone's release date the moment this move
+        // leaves every card on the milestone in done/discarded. Cards
+        // with no milestone (milestone_id IS NULL) are filtered out.
+        if ($issue['milestone_id'] !== null) {
+            $this->milestones->refreshReleaseStatus((int) $issue['milestone_id']);
+        }
+
         return [
             'ok'   => true,
             'card' => [
@@ -608,6 +615,24 @@ final class Api
         if ((string) $existing['status'] !== $status) {
             $position = $this->nextPositionInStatus($status);
             $this->issues->setStatus($id, $status, $position);
+        }
+
+        // Auto-fill the release date on any milestone this edit may
+        // have tipped over the "all cards done/discarded" threshold.
+        // When the milestone was reassigned we re-check both sides:
+        // the previous milestone may now be complete because this
+        // card was the only blocker, and the new one may be complete
+        // because the moved card arrived already done/discarded.
+        // Unassigned milestones (NULL) are filtered out — there is
+        // nothing to release.
+        $previousMilestoneId = $existing['milestone_id'] !== null
+            ? (int) $existing['milestone_id']
+            : null;
+        if ($previousMilestoneId !== null && $previousMilestoneId !== $milestoneId) {
+            $this->milestones->refreshReleaseStatus($previousMilestoneId);
+        }
+        if ($milestoneId !== null) {
+            $this->milestones->refreshReleaseStatus($milestoneId);
         }
 
         return [
