@@ -131,53 +131,78 @@ a:hover {
     color: #7b8794;
 }
 
-/* Roadmap */
-.roadmap {
+/* Releases */
+.releases {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+
+.release-project {
+    background: #fff;
+    border: 1px solid #e4e7eb;
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+}
+
+.release-project-header {
+    border-bottom: 1px solid #e4e7eb;
+    padding-bottom: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.release-project-header h3 {
+    margin: 0;
+    font-size: 1.05rem;
+}
+
+.release-project-meta {
+    margin: 0.25rem 0 0;
+    font-size: 0.8rem;
+    color: #7b8794;
+}
+
+.release-list {
     list-style: none;
     padding: 0;
     margin: 0;
-    border-left: 2px solid #cbd2d9;
+    max-height: 280px;
+    overflow-y: auto;
 }
 
-.roadmap-item {
-    position: relative;
-    padding: 0.75rem 1rem 0.75rem 2rem;
+.release {
+    padding: 0.5rem 0;
+    border-bottom: 1px dashed #e4e7eb;
 }
 
-.roadmap-item::before {
-    content: "";
-    position: absolute;
-    left: -7px;
-    top: 1rem;
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    background: #cbd2d9;
-    border: 2px solid #f5f7fa;
+.release:last-child {
+    border-bottom: none;
 }
 
-.roadmap-item.done::before {
-    background: #10b981;
-}
-
-.roadmap-item.active::before {
-    background: #2563eb;
-}
-
-.roadmap-date {
+.release-version {
     display: inline-block;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.85rem;
     font-weight: 600;
-    color: #52606d;
+    color: #1f2933;
+    background: #f5f7fa;
+    border: 1px solid #e4e7eb;
+    border-radius: 4px;
+    padding: 0.05rem 0.4rem;
     margin-right: 0.5rem;
 }
 
-.roadmap-body h3 {
-    margin: 0.25rem 0;
-    font-size: 1rem;
+.release-date {
+    font-size: 0.8rem;
+    color: #7b8794;
 }
 
-.roadmap-body p {
-    margin: 0;
+.release-notes {
+    margin: 0.25rem 0 0;
+    font-size: 0.9rem;
     color: #52606d;
 }
 

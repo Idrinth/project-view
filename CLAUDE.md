@@ -49,7 +49,8 @@ Static HTML scaffolding only - no real data, no JS behaviour yet.
 - `index.html` - overview / landing page with links to the three views
 - `kanban.html` - three-column board (Todo / In Progress / Done) with
   placeholder cards
-- `roadmap.html` - vertical timeline of upcoming milestones
+- `releases.html` - grid of tracked projects, each listing its
+  historical version releases with date and notes
 - `time.html` - table of tracked hours per day and task category
 
 ## Build
