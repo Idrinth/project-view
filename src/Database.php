@@ -136,6 +136,25 @@ final class Database
             $this->pdo->exec('ALTER TABLE issues ADD COLUMN description TEXT NULL');
         }
 
+        if (!$this->hasColumn('time_entries', 'user_id')) {
+            // Adds the per-entry author column for installs that predate
+            // it. Existing rows are backfilled with user-id 1 (the
+            // bootstrap account) via the column default, so historical
+            // time entries stay visible and aggregations keep working.
+            // The FK to users(id) is intentionally omitted on the
+            // ALTER path: SQLite forbids adding a NOT NULL REFERENCES
+            // column except with a NULL default. Fresh installs still
+            // get the FK from the CREATE TABLE in schema().
+            $this->pdo->exec(
+                'ALTER TABLE time_entries ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1'
+            );
+        }
+        // Ensure the companion index exists. Runs after the ALTER above
+        // so the column is always present when the index is built; IF
+        // NOT EXISTS keeps it a no-op on fresh installs that already
+        // built the index from schema().
+        $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_time_entries_user ON time_entries(user_id)');
+
         // Collapse the legacy split 'waiting-external' / 'waiting-internal'
         // statuses into a single 'waiting' status. Older installs have
         // rows tagged with the old values; the kanban only renders one
@@ -358,19 +377,31 @@ final class Database
             // on a single issue on a specific date, optionally tagged
             // with a work category (e.g. Development, Testing,
             // Research). These rows are the source of truth.
+            //
+            // user_id attributes the entry to the account that logged
+            // it. Defaults to 1 so legacy installs that predate the
+            // column get backfilled to the bootstrap user; the API
+            // stamps it with the signed-in user on every new entry.
             "CREATE TABLE IF NOT EXISTS time_entries (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 issue_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL DEFAULT 1,
                 category TEXT NOT NULL DEFAULT '',
                 spent_on TEXT NOT NULL,
                 hours REAL NOT NULL,
                 note TEXT NULL,
                 created_at TEXT NOT NULL,
-                FOREIGN KEY (issue_id) REFERENCES issues(id) ON DELETE CASCADE
+                FOREIGN KEY (issue_id) REFERENCES issues(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id)
             )",
             "CREATE INDEX IF NOT EXISTS idx_time_entries_issue ON time_entries(issue_id)",
             "CREATE INDEX IF NOT EXISTS idx_time_entries_spent_on ON time_entries(spent_on)",
             "CREATE INDEX IF NOT EXISTS idx_time_entries_category ON time_entries(category)",
+            // The user_id index is added by applyInPlaceMigrations()
+            // after the column has been guaranteed to exist, so the
+            // same code path works for fresh installs (column present
+            // from the CREATE TABLE above) and older installs being
+            // upgraded (column just added by ALTER TABLE).
 
             // Aggregated time tracking cache. Rows here are derived
             // from time_entries and used by high-traffic read paths

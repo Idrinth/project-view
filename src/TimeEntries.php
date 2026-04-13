@@ -29,16 +29,18 @@ final class TimeEntries
         string $spentOn,
         float $hours,
         string $category = '',
-        ?string $note = null
+        ?string $note = null,
+        int $userId = 1
     ): int {
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO time_entries
-                (issue_id, category, spent_on, hours, note, created_at)
+                (issue_id, user_id, category, spent_on, hours, note, created_at)
              VALUES
-                (:issue_id, :category, :spent_on, :hours, :note, :created_at)'
+                (:issue_id, :user_id, :category, :spent_on, :hours, :note, :created_at)'
         );
         $stmt->execute([
             'issue_id'   => $issueId,
+            'user_id'    => $userId,
             'category'   => $category,
             'spent_on'   => $spentOn,
             'hours'      => $hours,
@@ -64,10 +66,15 @@ final class TimeEntries
      */
     public function forIssue(int $issueId): array
     {
+        // LEFT JOIN so an entry whose author was deleted from the
+        // users table still surfaces - the username comes back NULL
+        // and the detail view falls back to displaying the bare id.
         $stmt = $this->db->pdo()->prepare(
-            'SELECT * FROM time_entries
-             WHERE issue_id = :issue_id
-             ORDER BY spent_on DESC, id DESC'
+            'SELECT te.*, u.username AS username
+             FROM time_entries te
+             LEFT JOIN users u ON u.id = te.user_id
+             WHERE te.issue_id = :issue_id
+             ORDER BY te.spent_on DESC, te.id DESC'
         );
         $stmt->execute(['issue_id' => $issueId]);
         /** @var list<array<string, mixed>> $rows */
