@@ -1366,6 +1366,12 @@ input:disabled:focus {
     color: var(--color-danger);
 }
 
+.profile-section-title {
+    margin-top: 2rem;
+    border-top: 1px solid var(--color-border);
+    padding-top: 1.5rem;
+}
+
 /* Inline mention of a user (comment author, time entry reporter,
    release contributor, nav greeting). A dotted underline hints at
    the hover tooltip without pulling focus from the surrounding

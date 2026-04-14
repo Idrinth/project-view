@@ -103,6 +103,8 @@ final class Api
                 return $this->profile($method, $body);
             case 'profile-picture':
                 return $this->profilePicture($method, $body);
+            case 'password':
+                return $this->password($method, $body);
             case 'user':
                 return $this->user($method, $body);
             default:
@@ -329,6 +331,49 @@ final class Api
 
         $fresh = $this->users->findByUsername($username) ?? $row;
         return ['profile' => self::profilePayload($fresh)];
+    }
+
+    /**
+     * Change the signed-in user's password. The caller must supply the
+     * current password so a hijacked session cannot silently swap the
+     * credentials out from under the real owner. The new password is
+     * hashed via Users::setPassword(); the existing session cookie is
+     * left in place so the user stays signed in.
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private function password(string $method, array $body): array
+    {
+        if ($method !== 'POST') {
+            throw new BadRequestException('password requires POST');
+        }
+        $username = $this->requireUser();
+        $row = $this->users->findByUsername($username);
+        if (!is_array($row) || !isset($row['id'])) {
+            throw new UnauthorizedException('not signed in');
+        }
+
+        $current = isset($body['currentPassword']) && is_string($body['currentPassword'])
+            ? $body['currentPassword']
+            : '';
+        $next = isset($body['newPassword']) && is_string($body['newPassword'])
+            ? $body['newPassword']
+            : '';
+
+        if ($current === '' || $next === '') {
+            throw new BadRequestException('current and new password are required');
+        }
+
+        $hash = isset($row['password_hash']) && is_string($row['password_hash'])
+            ? $row['password_hash']
+            : '';
+        if ($hash === '' || !password_verify($current, $hash)) {
+            throw new BadRequestException('current password is incorrect');
+        }
+
+        $this->users->setPassword((int) $row['id'], $next);
+        return ['ok' => true];
     }
 
     /**
