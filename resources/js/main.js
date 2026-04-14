@@ -2562,6 +2562,130 @@
         });
     }
 
+    // Deterministic palette used for the time tracking pie charts. Two
+    // sibling charts on the same page look related when they reuse the
+    // same colour set, and keying off the slice index (rather than the
+    // label) keeps things predictable even when categories and
+    // contributors overlap.
+    var PIE_COLORS = [
+        '#1f6feb', '#2da44e', '#d29922', '#cf222e', '#8250df',
+        '#bf3989', '#0969da', '#9a6700', '#1a7f37', '#6e7781'
+    ];
+
+    // Build the two pie charts (hours by category, hours by
+    // contributor) that sit above the per-week tables on the time
+    // tracking page. Returns null when there is nothing to plot so the
+    // view just skips the block for empty data sets.
+    function buildTimeCharts(categoryTotals, contributorTotals) {
+        var hasCategories = categoryTotals && categoryTotals.length > 0;
+        var hasContributors = contributorTotals && contributorTotals.length > 0;
+        if (!hasCategories && !hasContributors) {
+            return null;
+        }
+        var wrap = el('div', { className: 'time-charts' });
+        if (hasCategories) {
+            wrap.appendChild(buildPieChart('Hours by category', categoryTotals));
+        }
+        if (hasContributors) {
+            wrap.appendChild(buildPieChart('Hours by contributor', contributorTotals));
+        }
+        return wrap;
+    }
+
+    // Render a single labelled pie chart. `slices` is the
+    // already-sorted list of `{label, hours}` objects coming from the
+    // API. The SVG is drawn at a 100x100 viewBox so the outer CSS can
+    // resize it freely; slices are arcs via the standard "two points
+    // on a unit circle" approach, with a full-circle special case so a
+    // single-slice dataset still renders.
+    function buildPieChart(title, slices) {
+        var total = 0;
+        slices.forEach(function (slice) { total += Number(slice.hours) || 0; });
+        var section = el('section', { className: 'time-chart' }, [
+            el('h3', { className: 'time-chart-title', text: title })
+        ]);
+
+        if (total <= 0) {
+            section.appendChild(el('p', {
+                className: 'time-chart-empty muted',
+                text: 'No hours logged yet.'
+            }));
+            return section;
+        }
+
+        var svgNs = 'http://www.w3.org/2000/svg';
+        var svg = document.createElementNS(svgNs, 'svg');
+        svg.setAttribute('class', 'time-chart-svg');
+        svg.setAttribute('viewBox', '0 0 100 100');
+        svg.setAttribute('role', 'img');
+        svg.setAttribute('aria-label', title);
+
+        var cx = 50;
+        var cy = 50;
+        var r = 48;
+        var startAngle = -Math.PI / 2; // Start at 12 o'clock.
+        slices.forEach(function (slice, i) {
+            var hours = Number(slice.hours) || 0;
+            if (hours <= 0) {
+                return;
+            }
+            var fraction = hours / total;
+            var color = PIE_COLORS[i % PIE_COLORS.length];
+            var shape;
+            if (fraction >= 0.999999) {
+                // A single slice covers the full circle; arcs with the
+                // same start and end point collapse to nothing, so fall
+                // back to a plain circle for this case.
+                shape = document.createElementNS(svgNs, 'circle');
+                shape.setAttribute('cx', String(cx));
+                shape.setAttribute('cy', String(cy));
+                shape.setAttribute('r', String(r));
+            } else {
+                var endAngle = startAngle + fraction * 2 * Math.PI;
+                var x1 = cx + r * Math.cos(startAngle);
+                var y1 = cy + r * Math.sin(startAngle);
+                var x2 = cx + r * Math.cos(endAngle);
+                var y2 = cy + r * Math.sin(endAngle);
+                var largeArc = fraction > 0.5 ? 1 : 0;
+                var d = 'M ' + cx + ' ' + cy +
+                        ' L ' + x1.toFixed(3) + ' ' + y1.toFixed(3) +
+                        ' A ' + r + ' ' + r + ' 0 ' + largeArc + ' 1 ' +
+                        x2.toFixed(3) + ' ' + y2.toFixed(3) + ' Z';
+                shape = document.createElementNS(svgNs, 'path');
+                shape.setAttribute('d', d);
+                startAngle = endAngle;
+            }
+            shape.setAttribute('fill', color);
+            var titleEl = document.createElementNS(svgNs, 'title');
+            titleEl.textContent = slice.label + ': ' + formatHours(hours) + 'h (' +
+                Math.round(fraction * 100) + '%)';
+            shape.appendChild(titleEl);
+            svg.appendChild(shape);
+        });
+
+        var legend = el('ul', { className: 'time-chart-legend' });
+        slices.forEach(function (slice, i) {
+            var hours = Number(slice.hours) || 0;
+            if (hours <= 0) {
+                return;
+            }
+            var percent = Math.round((hours / total) * 100);
+            var swatch = el('span', { className: 'time-chart-swatch' });
+            swatch.style.background = PIE_COLORS[i % PIE_COLORS.length];
+            legend.appendChild(el('li', { className: 'time-chart-legend-item' }, [
+                swatch,
+                el('span', { className: 'time-chart-legend-label', text: slice.label }),
+                el('span', {
+                    className: 'time-chart-legend-value',
+                    text: formatHours(hours) + 'h (' + percent + '%)'
+                })
+            ]));
+        });
+
+        section.appendChild(el('div', { className: 'time-chart-body' }, [svg, legend]));
+        return section;
+    }
+
     var renderers = {
         kanban: function (container, data, options) {
             var canEdit = !!(options && options.user);
@@ -2659,6 +2783,14 @@
         time: function (container, data) {
             var categories = (data && data.categories) || [];
             var weeks = (data && data.weeks) || [];
+            var categoryTotals = (data && data.categoryTotals) || [];
+            var contributorTotals = (data && data.contributorTotals) || [];
+
+            var charts = buildTimeCharts(categoryTotals, contributorTotals);
+            if (charts) {
+                container.appendChild(charts);
+            }
+
             weeks.forEach(function (week) {
                 var section = el('section', { className: 'time-week' });
                 section.appendChild(el('h3', {
