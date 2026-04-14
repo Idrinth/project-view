@@ -1365,3 +1365,119 @@ input:disabled:focus {
 .profile-status-error {
     color: var(--color-danger);
 }
+
+/* Inline mention of a user (comment author, time entry reporter,
+   release contributor, nav greeting). A dotted underline hints at
+   the hover tooltip without pulling focus from the surrounding
+   metadata. */
+.user-mention {
+    text-decoration: underline dotted;
+    text-underline-offset: 0.2em;
+    text-decoration-color: var(--color-text-subtle);
+    cursor: help;
+}
+
+.user-mention:hover,
+.user-mention:focus {
+    text-decoration-color: var(--color-accent);
+}
+
+a.user-mention {
+    color: inherit;
+    cursor: pointer;
+}
+
+.user-menu-name.user-mention {
+    text-decoration-color: var(--color-header-text-muted);
+}
+
+/* Floating profile card shown on hover/focus of a user mention.
+   Positioned absolutely by JS so it is not bound to its originating
+   container's overflow or stacking context. */
+.user-tooltip {
+    position: absolute;
+    z-index: 1000;
+    max-width: 20rem;
+    min-width: 14rem;
+    padding: 0.75rem 0.9rem;
+    background: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    box-shadow: 0 10px 30px var(--color-shadow-modal);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    line-height: 1.35;
+    pointer-events: auto;
+}
+
+.user-tooltip[hidden] {
+    display: none;
+}
+
+.user-tooltip-header {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.user-tooltip-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: var(--color-surface-sunken);
+    border: 1px solid var(--color-border);
+}
+
+.user-tooltip-avatar-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+}
+
+.user-tooltip-identity {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+}
+
+.user-tooltip-name {
+    margin: 0;
+    font-weight: 600;
+    word-break: break-word;
+}
+
+.user-tooltip-username {
+    margin: 0;
+    font-size: 0.75rem;
+}
+
+.user-tooltip-url {
+    color: var(--color-accent);
+    word-break: break-all;
+    font-size: 0.8rem;
+}
+
+.user-tooltip-url:hover {
+    color: var(--color-accent-hover);
+}
+
+.user-tooltip-about {
+    margin: 0;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    color: var(--color-text-muted);
+}
+
+.user-tooltip-empty {
+    margin: 0;
+    font-size: 0.8rem;
+}

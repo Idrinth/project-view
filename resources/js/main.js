@@ -12,6 +12,7 @@
     document.addEventListener('DOMContentLoaded', function () {
         bindLoginForm();
         initThemeToggle();
+        initUserTooltips();
 
         // Fetch the current user once and share the result between the
         // nav user-menu and the view renderer. The promise never
@@ -435,11 +436,18 @@
         clear(slot);
         // Prefer the user-chosen display name; fall back to the login
         // username so the slot is never empty. The name links to the
-        // profile editor so it doubles as the entry point.
-        var label = (user.displayName || '').trim() || user.name;
+        // profile editor so it doubles as the entry point. The
+        // data-user-mention attribute lets the shared hover tooltip
+        // surface the full profile when someone hovers the nav.
+        var label = userLabel({
+            displayName: user.displayName,
+            username: user.name,
+            fallback: user.name
+        });
         slot.appendChild(el('a', {
-            className: 'user-menu-name',
+            className: 'user-menu-name user-mention',
             href: 'profile.html',
+            'data-user-mention': user.name || '',
             text: label
         }));
         var button = el('button', { className: 'user-menu-logout', type: 'button', text: 'Sign out' });
@@ -524,7 +532,15 @@
                 options.body = JSON.stringify(body);
             }
         }
-        return fetch(API_BASE + encodeURIComponent(endpoint), options)
+        // Separate any query string from the endpoint name so only the
+        // path segment is URL-encoded. Without this, a call like
+        // `user?username=alice` would turn into `user%3Fusername%3Dalice`
+        // and the front controller would treat the whole blob as the
+        // endpoint name.
+        var queryIndex = endpoint.indexOf('?');
+        var path = queryIndex >= 0 ? endpoint.slice(0, queryIndex) : endpoint;
+        var query = queryIndex >= 0 ? endpoint.slice(queryIndex) : '';
+        return fetch(API_BASE + encodeURIComponent(path) + query, options)
             .then(function (response) {
                 return response.json().then(
                     function (data) { return { response: response, data: data }; },
@@ -597,6 +613,318 @@
         return el('time', { datetime: value, text: value });
     }
 
+    // Resolve the label used when showing a person. The display name
+    // wins whenever the user has set one; the login username is the
+    // fallback so accounts that haven't filled in their profile still
+    // get a visible label. `info.fallback` is used only when neither is
+    // set (e.g. a deleted account referenced by user id) so the label
+    // is never the empty string.
+    function userLabel(info) {
+        if (!info) {
+            return '';
+        }
+        var display = typeof info.displayName === 'string' ? info.displayName.trim() : '';
+        if (display) {
+            return display;
+        }
+        var username = typeof info.username === 'string' ? info.username.trim() : '';
+        if (username) {
+            return username;
+        }
+        return info.fallback || '';
+    }
+
+    // Render a person's label as a hover target. The label always
+    // renders the display name when the user has set one (falling back
+    // to the login username), and carries the login username in a data
+    // attribute so the shared hover tooltip can look up the full
+    // profile lazily.
+    //
+    // `info` may include: { username, displayName, fallback, className,
+    // tag }. Passing `fallback` lets callers surface a synthetic label
+    // like "#42" when the user reference has been orphaned.
+    function userMentionEl(info, extras) {
+        info = info || {};
+        extras = extras || {};
+        var tag = extras.tag || 'span';
+        var className = 'user-mention';
+        if (extras.className) {
+            className += ' ' + extras.className;
+        }
+        var attrs = { className: className };
+        var username = typeof info.username === 'string' ? info.username.trim() : '';
+        if (username) {
+            attrs['data-user-mention'] = username;
+        }
+        var label = userLabel(info);
+        if (!label) {
+            // Without a label there is nothing meaningful to hover on;
+            // return a bare text node so the caller can slot it in
+            // without worrying about empty spans.
+            return document.createTextNode('');
+        }
+        attrs.text = label;
+        if (extras.title) {
+            attrs.title = extras.title;
+        }
+        return el(tag, attrs);
+    }
+
+    // ---------- Shared hover tooltip for user mentions ----------
+    //
+    // Every element produced by userMentionEl() carries a
+    // `data-user-mention` attribute. A single document-level listener
+    // drives the popover so new mentions inserted after load (e.g. a
+    // freshly posted comment) pick up the behaviour automatically. The
+    // profile payload is cached by username for the lifetime of the
+    // page so repeated hovers over the same person don't refetch.
+    var userProfileCache = {};
+    var userProfileInflight = {};
+    var userTooltipEl = null;
+    var userTooltipTarget = null;
+    var userTooltipHideTimer = null;
+
+    function getUserTooltipEl() {
+        if (userTooltipEl) {
+            return userTooltipEl;
+        }
+        userTooltipEl = el('div', {
+            className: 'user-tooltip',
+            role: 'tooltip'
+        });
+        userTooltipEl.hidden = true;
+        // Keeping the tooltip interactive (mouse can enter it without
+        // dismissing) lets users click the website link or select the
+        // about text.
+        userTooltipEl.addEventListener('mouseenter', cancelUserTooltipHide);
+        userTooltipEl.addEventListener('mouseleave', scheduleUserTooltipHide);
+        document.body.appendChild(userTooltipEl);
+        return userTooltipEl;
+    }
+
+    function fetchUserProfile(username) {
+        if (userProfileCache[username]) {
+            return Promise.resolve(userProfileCache[username]);
+        }
+        if (userProfileInflight[username]) {
+            return userProfileInflight[username];
+        }
+        var promise = apiRequest('GET', 'user?username=' + encodeURIComponent(username))
+            .then(function (data) {
+                var profile = (data && data.profile) || { username: username };
+                userProfileCache[username] = profile;
+                delete userProfileInflight[username];
+                return profile;
+            })
+            .catch(function () {
+                // Swallow the error - tooltips are a nice-to-have and a
+                // transient API hiccup should not break the surrounding
+                // view. Cache a stub so we do not hammer the backend on
+                // repeated hovers.
+                var stub = { username: username, displayName: '', websiteUrl: '', about: '', avatar: null };
+                userProfileCache[username] = stub;
+                delete userProfileInflight[username];
+                return stub;
+            });
+        userProfileInflight[username] = promise;
+        return promise;
+    }
+
+    function renderUserTooltip(profile) {
+        var tip = getUserTooltipEl();
+        clear(tip);
+
+        var header = el('div', { className: 'user-tooltip-header' });
+        var avatarSlot;
+        if (profile && profile.avatar) {
+            avatarSlot = el('img', {
+                className: 'user-tooltip-avatar',
+                src: profile.avatar,
+                alt: ''
+            });
+        } else {
+            var initial = userLabel({
+                displayName: profile && profile.displayName,
+                username: profile && profile.username,
+                fallback: '?'
+            }).charAt(0).toUpperCase() || '?';
+            avatarSlot = el('div', {
+                className: 'user-tooltip-avatar user-tooltip-avatar-placeholder',
+                text: initial
+            });
+        }
+        header.appendChild(avatarSlot);
+
+        var name = userLabel({
+            displayName: profile && profile.displayName,
+            username: profile && profile.username,
+            fallback: profile && profile.username ? profile.username : ''
+        });
+        var identity = el('div', { className: 'user-tooltip-identity' });
+        identity.appendChild(el('p', {
+            className: 'user-tooltip-name',
+            text: name || '\u2014'
+        }));
+        if (profile && profile.username && profile.username !== name) {
+            identity.appendChild(el('p', {
+                className: 'user-tooltip-username muted',
+                text: '@' + profile.username
+            }));
+        }
+        header.appendChild(identity);
+        tip.appendChild(header);
+
+        if (profile && profile.websiteUrl) {
+            tip.appendChild(el('a', {
+                className: 'user-tooltip-url',
+                href: profile.websiteUrl,
+                target: '_blank',
+                rel: 'noopener',
+                text: profile.websiteUrl
+            }));
+        }
+        if (profile && profile.about) {
+            tip.appendChild(el('p', {
+                className: 'user-tooltip-about',
+                text: profile.about
+            }));
+        }
+        if ((!profile || (!profile.websiteUrl && !profile.about)) && (!profile || !profile.avatar)) {
+            tip.appendChild(el('p', {
+                className: 'user-tooltip-empty muted',
+                text: 'No profile details yet.'
+            }));
+        }
+    }
+
+    function positionUserTooltip(target) {
+        var tip = getUserTooltipEl();
+        var rect = target.getBoundingClientRect();
+        // Show the tooltip below the mention by default; flip above
+        // when there is no room. Horizontal position tracks the
+        // mention but gets nudged back inside the viewport.
+        var margin = 8;
+        tip.style.visibility = 'hidden';
+        tip.hidden = false;
+        var tipRect = tip.getBoundingClientRect();
+        var top = rect.bottom + margin + window.pageYOffset;
+        if (rect.bottom + margin + tipRect.height > window.innerHeight
+            && rect.top - margin - tipRect.height > 0) {
+            top = rect.top - margin - tipRect.height + window.pageYOffset;
+        }
+        var left = rect.left + window.pageXOffset;
+        var maxLeft = window.pageXOffset + window.innerWidth - tipRect.width - margin;
+        if (left > maxLeft) {
+            left = maxLeft;
+        }
+        if (left < window.pageXOffset + margin) {
+            left = window.pageXOffset + margin;
+        }
+        tip.style.left = Math.max(0, Math.round(left)) + 'px';
+        tip.style.top = Math.max(0, Math.round(top)) + 'px';
+        tip.style.visibility = '';
+    }
+
+    function showUserTooltip(target) {
+        cancelUserTooltipHide();
+        var username = target.getAttribute('data-user-mention') || '';
+        if (!username) {
+            return;
+        }
+        userTooltipTarget = target;
+        var tip = getUserTooltipEl();
+        // Render an initial placeholder so the first hover feels
+        // responsive even if the network roundtrip is slow.
+        renderUserTooltip({ username: username, displayName: target.textContent || '' });
+        tip.hidden = false;
+        positionUserTooltip(target);
+        fetchUserProfile(username).then(function (profile) {
+            if (userTooltipTarget !== target) {
+                return;
+            }
+            renderUserTooltip(profile);
+            positionUserTooltip(target);
+        });
+    }
+
+    function hideUserTooltip() {
+        if (!userTooltipEl) {
+            return;
+        }
+        userTooltipEl.hidden = true;
+        userTooltipTarget = null;
+    }
+
+    function scheduleUserTooltipHide() {
+        cancelUserTooltipHide();
+        userTooltipHideTimer = setTimeout(hideUserTooltip, 120);
+    }
+
+    function cancelUserTooltipHide() {
+        if (userTooltipHideTimer) {
+            clearTimeout(userTooltipHideTimer);
+            userTooltipHideTimer = null;
+        }
+    }
+
+    function initUserTooltips() {
+        document.addEventListener('mouseover', function (event) {
+            var target = event.target;
+            if (!target || typeof target.closest !== 'function') {
+                return;
+            }
+            var mention = target.closest('[data-user-mention]');
+            if (!mention) {
+                return;
+            }
+            showUserTooltip(mention);
+        });
+        document.addEventListener('mouseout', function (event) {
+            var target = event.target;
+            if (!target || typeof target.closest !== 'function') {
+                return;
+            }
+            var mention = target.closest('[data-user-mention]');
+            if (!mention) {
+                return;
+            }
+            // Only schedule a hide when the pointer leaves for somewhere
+            // that is neither the mention nor the tooltip itself; that
+            // keeps the card available long enough to click the link.
+            var related = event.relatedTarget;
+            if (related && typeof related.closest === 'function') {
+                if (related.closest('[data-user-mention]') === mention) {
+                    return;
+                }
+                if (userTooltipEl && related.closest('.user-tooltip') === userTooltipEl) {
+                    return;
+                }
+            }
+            scheduleUserTooltipHide();
+        });
+        document.addEventListener('focusin', function (event) {
+            var target = event.target;
+            if (!target || typeof target.closest !== 'function') {
+                return;
+            }
+            var mention = target.closest('[data-user-mention]');
+            if (mention) {
+                showUserTooltip(mention);
+            }
+        });
+        document.addEventListener('focusout', function (event) {
+            var target = event.target;
+            if (!target || typeof target.closest !== 'function') {
+                return;
+            }
+            if (target.closest('[data-user-mention]')) {
+                scheduleUserTooltipHide();
+            }
+        });
+        window.addEventListener('scroll', hideUserTooltip, true);
+        window.addEventListener('resize', hideUserTooltip);
+    }
+
     var draggedCard = null;
     var draggedOriginParent = null;
     var draggedOriginNext = null;
@@ -653,12 +981,13 @@
             if (contributors.length > 0) {
                 var contribList = el('ul', { className: 'release-contributors' });
                 contributors.forEach(function (contributor) {
-                    var name = contributor.displayName || contributor.username;
-                    if (!name) {
-                        name = '#' + contributor.userId;
-                    }
+                    var nameEl = userMentionEl({
+                        username: contributor.username,
+                        displayName: contributor.displayName,
+                        fallback: contributor.userId != null ? '#' + contributor.userId : ''
+                    }, { className: 'release-contributor-name' });
                     contribList.appendChild(el('li', { className: 'release-contributor' }, [
-                        el('span', { className: 'release-contributor-name', text: name }),
+                        nameEl,
                         ' \u00b7 ',
                         el('span', {
                             className: 'release-contributor-hours',
@@ -1266,7 +1595,8 @@
                         category: entry.category || '',
                         note: entry.note || '',
                         userId: entry.userId != null ? entry.userId : null,
-                        userName: entry.userName || ''
+                        userName: entry.userName || '',
+                        displayName: entry.displayName || ''
                     });
                     renderTimeEntries(listWrap, entries);
                     hoursInput.value = '';
@@ -1304,14 +1634,21 @@
             if (entry.category) {
                 meta += ' \u00b7 ' + entry.category;
             }
-            // Attribution: prefer the username, but fall back to the
-            // raw user id so legacy rows backfilled with the bootstrap
-            // user are still visibly tagged.
-            var who = entry.userName || (entry.userId != null ? '#' + entry.userId : '');
-            if (who) {
-                meta += ' \u00b7 ' + who;
+            // Attribution: always prefer the display name, falling
+            // back to the login username and finally to the raw user id
+            // so legacy rows backfilled with the bootstrap user are
+            // still visibly tagged.
+            var metaParts = [document.createTextNode(meta)];
+            var hasWho = !!(entry.displayName || entry.userName || entry.userId != null);
+            if (hasWho) {
+                metaParts.push(document.createTextNode(' \u00b7 '));
+                metaParts.push(userMentionEl({
+                    username: entry.userName,
+                    displayName: entry.displayName,
+                    fallback: entry.userId != null ? '#' + entry.userId : ''
+                }));
             }
-            var children = [el('p', { className: 'detail-entry-meta', text: meta })];
+            var children = [el('p', { className: 'detail-entry-meta' }, metaParts)];
             if (entry.note) {
                 children.push(el('p', { className: 'detail-entry-note', text: entry.note }));
             }
@@ -1436,11 +1773,20 @@
         }
         var list = el('ul', { className: 'detail-comments' });
         comments.forEach(function (c) {
+            var hasAuthor = !!(c.author || c.displayName);
+            var metaChildren = [];
+            if (hasAuthor) {
+                metaChildren.push(userMentionEl({
+                    username: c.author,
+                    displayName: c.displayName,
+                    fallback: 'unknown'
+                }));
+            } else {
+                metaChildren.push(document.createTextNode('unknown'));
+            }
+            metaChildren.push(document.createTextNode(' \u00b7 ' + (c.createdAt || '')));
             var item = el('li', { className: 'detail-comment' }, [
-                el('p', {
-                    className: 'detail-comment-meta',
-                    text: (c.author || 'unknown') + ' \u00b7 ' + (c.createdAt || '')
-                })
+                el('p', { className: 'detail-comment-meta' }, metaChildren)
             ]);
             if (c.body) {
                 item.appendChild(el('p', { className: 'detail-comment-body', text: c.body }));
@@ -1912,9 +2258,19 @@
         var profile = (data && data.profile) || {};
 
         var heading = el('h2', { className: 'profile-title', text: 'Your profile' });
+        // "Signed in as" is the only place where we still surface the
+        // raw login username; showing the display name here would be
+        // tautological because the surrounding page is the display
+        // name editor. Falling back to the login name keeps the line
+        // meaningful when the account hasn't picked a display name yet.
+        var subtitleLabel = userLabel({
+            displayName: profile.displayName,
+            username: profile.username || options.user.name,
+            fallback: ''
+        });
         var subtitle = el('p', {
             className: 'muted profile-subtitle',
-            text: 'Signed in as ' + (profile.username || options.user.name || '')
+            text: 'Signed in as ' + subtitleLabel
         });
         container.appendChild(heading);
         container.appendChild(subtitle);

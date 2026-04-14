@@ -79,7 +79,15 @@ header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
 $body = [];
-if ($method === 'POST' || $method === 'PUT' || $method === 'PATCH') {
+if ($method === 'GET' || $method === 'DELETE') {
+    // GET and DELETE requests do not carry a body, but some endpoints
+    // (e.g. `user` for tooltip lookups) still need parameters. Forward
+    // the query string so handlers can read them the same way they
+    // read POSTed JSON.
+    if (!empty($_GET)) {
+        $body = $_GET;
+    }
+} elseif ($method === 'POST' || $method === 'PUT' || $method === 'PATCH') {
     $contentType = isset($_SERVER['CONTENT_TYPE']) && is_string($_SERVER['CONTENT_TYPE'])
         ? strtolower($_SERVER['CONTENT_TYPE'])
         : '';

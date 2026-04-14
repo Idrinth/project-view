@@ -45,10 +45,18 @@ final class Comments
      */
     public function forIssue(int $issueId): array
     {
+        // LEFT JOIN users by username so the display name is available
+        // in the same trip and the detail view can prefer it over the
+        // raw login name. A missing users row (deleted account, or a
+        // legacy comment whose author no longer exists) leaves
+        // display_name NULL and the frontend falls back to the author
+        // column as it always did.
         $stmt = $this->db->pdo()->prepare(
-            'SELECT * FROM comments
-             WHERE issue_id = :issue_id
-             ORDER BY created_at ASC, id ASC'
+            'SELECT c.*, u.display_name AS display_name
+             FROM comments c
+             LEFT JOIN users u ON u.username = c.author
+             WHERE c.issue_id = :issue_id
+             ORDER BY c.created_at ASC, c.id ASC'
         );
         $stmt->execute(['issue_id' => $issueId]);
         /** @var list<array<string, mixed>> $rows */

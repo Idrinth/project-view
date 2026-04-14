@@ -69,8 +69,11 @@ final class TimeEntries
         // LEFT JOIN so an entry whose author was deleted from the
         // users table still surfaces - the username comes back NULL
         // and the detail view falls back to displaying the bare id.
+        // display_name is pulled in the same trip so the detail view
+        // can prefer the author's chosen label without issuing a
+        // per-entry profile lookup.
         $stmt = $this->db->pdo()->prepare(
-            'SELECT te.*, u.username AS username
+            'SELECT te.*, u.username AS username, u.display_name AS display_name
              FROM time_entries te
              LEFT JOIN users u ON u.id = te.user_id
              WHERE te.issue_id = :issue_id
