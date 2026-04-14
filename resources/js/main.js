@@ -1070,8 +1070,11 @@
             ? el('p', { className: 'kanban-description', text: description })
             : el('p', { className: 'kanban-description kanban-description-empty', text: 'No description' });
 
+        var titleText = card.id != null
+            ? '#' + card.id + ' ' + card.title
+            : card.title;
         return [
-            el('h4', { text: card.title }),
+            el('h4', { text: titleText }),
             descriptionNode,
             categoryNode,
             el('p', { className: 'kanban-meta', text: 'Milestone: ' + (card.milestone || '\u2014') }),
