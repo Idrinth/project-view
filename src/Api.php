@@ -1926,6 +1926,13 @@ final class Api
      * Weeks are ISO calendar weeks (Monday through Sunday). Only
      * weeks that have at least one entry are returned.
      *
+     * The payload also carries cross-time summaries used by the pie
+     * charts on the time tracking page: total hours per category and
+     * total hours per contributor (the human who logged the entry).
+     * Entries whose category is empty are grouped under
+     * "Uncategorised" so the category pie always sums to the same
+     * total as the contributor pie.
+     *
      * @return array<string, mixed>
      */
     private function time(): array
@@ -1942,19 +1949,51 @@ final class Api
         $categories = array_map(static fn($row) => (string) $row['category'], $catRows);
         $categoryIndex = array_flip($categories);
 
+        // Pull the user label alongside each entry so the contributor
+        // pie chart can attribute hours by display name (falling back
+        // to the username, and then to "User #<id>" for deleted
+        // accounts still referenced by an entry).
         $stmt = $pdo->query(
-            'SELECT te.issue_id, te.category, te.spent_on, te.hours, i.title
+            'SELECT te.issue_id, te.user_id, te.category, te.spent_on, te.hours,
+                    i.title, u.username AS username, u.display_name AS display_name
                FROM time_entries te
                JOIN issues i ON i.id = te.issue_id
+               LEFT JOIN users u ON u.id = te.user_id
            ORDER BY te.spent_on DESC, te.id DESC'
         );
         /** @var list<array<string, mixed>> $entries */
         $entries = $stmt === false ? [] : $stmt->fetchAll();
 
         // Bucket entries by ISO week (keyed by the Monday start date),
-        // and within each week by issue.
+        // and within each week by issue. In parallel, accumulate the
+        // cross-time pie chart totals (per category and per
+        // contributor).
         $weeks = [];
+        $categoryTotals = [];
+        $contributorTotals = [];
         foreach ($entries as $entry) {
+            $hours = (float) $entry['hours'];
+            $cat = (string) $entry['category'];
+            $catLabel = $cat === '' ? 'Uncategorised' : $cat;
+            if (!isset($categoryTotals[$catLabel])) {
+                $categoryTotals[$catLabel] = 0.0;
+            }
+            $categoryTotals[$catLabel] += $hours;
+
+            $displayName = isset($entry['display_name']) ? trim((string) $entry['display_name']) : '';
+            $username = isset($entry['username']) ? (string) $entry['username'] : '';
+            if ($displayName !== '') {
+                $contribLabel = $displayName;
+            } elseif ($username !== '') {
+                $contribLabel = $username;
+            } else {
+                $contribLabel = 'User #' . (int) $entry['user_id'];
+            }
+            if (!isset($contributorTotals[$contribLabel])) {
+                $contributorTotals[$contribLabel] = 0.0;
+            }
+            $contributorTotals[$contribLabel] += $hours;
+
             $spentOn = (string) $entry['spent_on'];
             [$weekStart, $weekEnd] = self::weekRange($spentOn);
             if ($weekStart === null || $weekEnd === null) {
@@ -1978,11 +2017,10 @@ final class Api
                 ];
             }
 
-            $cat = (string) $entry['category'];
             if ($cat === '' || !isset($categoryIndex[$cat])) {
                 continue;
             }
-            $weeks[$weekStart]['issues'][$issueId]['hours'][$categoryIndex[$cat]] += (float) $entry['hours'];
+            $weeks[$weekStart]['issues'][$issueId]['hours'][$categoryIndex[$cat]] += $hours;
         }
 
         // Sort weeks by start date desc; flatten the per-issue map
@@ -1994,9 +2032,28 @@ final class Api
             $weeksOut[] = $week;
         }
 
+        // Sort pie chart slices by hours descending so the biggest
+        // slice leads each legend. Ties fall back to alphabetical for
+        // a stable ordering.
+        $sortTotals = static function (array $totals): array {
+            $out = [];
+            foreach ($totals as $label => $hours) {
+                $out[] = ['label' => (string) $label, 'hours' => (float) $hours];
+            }
+            usort($out, static function ($a, $b) {
+                if ($a['hours'] === $b['hours']) {
+                    return strcmp($a['label'], $b['label']);
+                }
+                return $a['hours'] < $b['hours'] ? 1 : -1;
+            });
+            return $out;
+        };
+
         return [
-            'categories' => $categories,
-            'weeks'      => $weeksOut,
+            'categories'        => $categories,
+            'weeks'             => $weeksOut,
+            'categoryTotals'    => $sortTotals($categoryTotals),
+            'contributorTotals' => $sortTotals($contributorTotals),
         ];
     }
 
