@@ -83,6 +83,27 @@ final class Users
     }
 
     /**
+     * Pull every user's public profile fields (plus id + username) in
+     * a single query, ordered by username. Used by the assignee picker
+     * on the kanban board so the dropdown can render each option with
+     * the user's display name and thumbnail avatar without issuing N
+     * separate `user` lookups.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function allProfiles(): array
+    {
+        $stmt = $this->db->pdo()->query(
+            'SELECT id, username, display_name, avatar_mime, avatar_data
+               FROM users
+           ORDER BY username ASC'
+        );
+        /** @var list<array<string, mixed>> $rows */
+        $rows = $stmt === false ? [] : $stmt->fetchAll();
+        return $rows;
+    }
+
+    /**
      * Rename a user. The password is left untouched.
      */
     public function rename(int $id, string $username): void

@@ -1159,8 +1159,12 @@
         var titleText = card.id != null
             ? '#' + card.id + ' ' + card.title
             : card.title;
+        var titleRow = el('div', { className: 'kanban-card-title-row' }, [
+            buildAssigneeAvatar(card.assignee),
+            el('h4', { className: 'kanban-card-title', text: titleText })
+        ]);
         return [
-            el('h4', { text: titleText }),
+            titleRow,
             descriptionNode,
             categoryNode,
             el('p', { className: 'kanban-meta', text: 'Milestone: ' + (card.milestone || '\u2014') }),
@@ -1173,6 +1177,61 @@
                 text: 'Time spent: ' + formatHours(card.timeSpent) + 'h'
             })
         ];
+    }
+
+    // Build the small avatar thumbnail that sits to the left of a card
+    // title. When the card has no assignee we render a muted "unassigned"
+    // placeholder so every card reserves the same horizontal space and
+    // the titles in a column stay visually aligned. The wrapper carries
+    // the hover-tooltip data attribute so pointing at the avatar pops
+    // up the same profile card as clicking on a name in a comment.
+    function buildAssigneeAvatar(assignee) {
+        var hasAssignee = assignee && (assignee.username || assignee.userId);
+        var username = hasAssignee && typeof assignee.username === 'string'
+            ? assignee.username.trim()
+            : '';
+        var displayName = hasAssignee && typeof assignee.displayName === 'string'
+            ? assignee.displayName.trim()
+            : '';
+        var label = displayName || username;
+        var title = hasAssignee
+            ? 'Assigned to ' + (label || ('user #' + (assignee.userId || '?')))
+            : 'Unassigned';
+        var wrapAttrs = {
+            className: 'kanban-assignee',
+            title: title,
+            'aria-label': title
+        };
+        if (username) {
+            // Plug into the shared user-mention hover tooltip so the
+            // avatar carries the same profile card as inline name
+            // mentions elsewhere in the UI.
+            wrapAttrs['data-user-mention'] = username;
+        }
+        var wrap = el('span', wrapAttrs);
+        if (hasAssignee && assignee.avatar) {
+            wrap.appendChild(el('img', {
+                className: 'kanban-assignee-avatar',
+                src: assignee.avatar,
+                alt: ''
+            }));
+        } else if (hasAssignee) {
+            // No uploaded avatar: fall back to the first letter of the
+            // chosen label on a subtle background, matching the shared
+            // user-tooltip placeholder style.
+            var initial = (label || '?').charAt(0).toUpperCase();
+            wrap.appendChild(el('span', {
+                className: 'kanban-assignee-avatar kanban-assignee-avatar-placeholder',
+                text: initial
+            }));
+        } else {
+            wrap.appendChild(el('span', {
+                className: 'kanban-assignee-avatar kanban-assignee-avatar-empty',
+                'aria-hidden': 'true',
+                text: '\u00b7'
+            }));
+        }
+        return wrap;
     }
 
     function buildCardEl(card, canEdit) {
@@ -1356,6 +1415,80 @@
         container.appendChild(buildCommentSection(issue, comments, canEdit));
     }
 
+    // Cache of the full user list, loaded lazily the first time an
+    // assignee picker is rendered. Signed-out visitors never hit this
+    // code path because the edit form and add-card modal are gated on
+    // `canEdit`. A rejected load becomes a resolved empty list so
+    // callers can still render a placeholder "Unassigned" option
+    // without retrying the request.
+    var usersListPromise = null;
+    function fetchUsersList() {
+        if (!usersListPromise) {
+            usersListPromise = apiRequest('GET', 'users-list')
+                .then(function (data) {
+                    return (data && Array.isArray(data.users)) ? data.users : [];
+                })
+                .catch(function () {
+                    // Reset so a future invocation may retry.
+                    usersListPromise = null;
+                    return [];
+                });
+        }
+        return usersListPromise;
+    }
+
+    // Build an assignee <select>. The list is populated asynchronously
+    // from `users-list` so the form can render immediately; until the
+    // fetch lands the select contains only the placeholder option
+    // and the currently-assigned user (if any). `currentAssignee` is
+    // the card/issue assignee payload (`{username, displayName, ...}`)
+    // or null when the card is unassigned.
+    function buildAssigneeSelect(currentAssignee) {
+        var select = el('select', { className: 'assignee-select' });
+        function populate(users) {
+            clear(select);
+            select.appendChild(el('option', { value: '', text: 'Unassigned' }));
+            var current = currentAssignee && currentAssignee.username
+                ? currentAssignee.username
+                : '';
+            var seen = {};
+            (users || []).forEach(function (user) {
+                if (!user || !user.username) {
+                    return;
+                }
+                seen[user.username] = true;
+                var label = user.displayName && user.displayName.trim()
+                    ? user.displayName + ' (' + user.username + ')'
+                    : user.username;
+                select.appendChild(el('option', {
+                    value: user.username,
+                    text: label
+                }));
+            });
+            // Preserve an assignee that the picker hasn't heard of
+            // (e.g. a user created after the page was loaded) so
+            // saving doesn't accidentally clear the field.
+            if (current && !seen[current]) {
+                var currentLabel = currentAssignee.displayName && currentAssignee.displayName.trim()
+                    ? currentAssignee.displayName + ' (' + current + ')'
+                    : current;
+                select.appendChild(el('option', {
+                    value: current,
+                    text: currentLabel
+                }));
+            }
+            select.value = current;
+        }
+        // Seed with the current assignee so the field is non-empty
+        // while the users list is still loading.
+        populate(currentAssignee ? [{
+            username: currentAssignee.username,
+            displayName: currentAssignee.displayName
+        }] : []);
+        fetchUsersList().then(populate);
+        return select;
+    }
+
     function buildEditSection(issue, cardEl, canEdit) {
         var section = el('section', { className: 'detail-section' });
         section.appendChild(el('h4', { text: canEdit ? 'Edit' : 'Details' }));
@@ -1400,6 +1533,8 @@
         var completedInput = el('input', { type: 'date' });
         completedInput.value = issue.workCompleted || '';
 
+        var assigneeSelect = canEdit ? buildAssigneeSelect(issue.assignee) : null;
+
         if (!canEdit) {
             // Viewers see the same fields so nothing disappears from
             // the detail view, but every control is locked down.
@@ -1416,6 +1551,19 @@
 
         form.appendChild(field('Title', titleInput, true));
         form.appendChild(field('Status', statusSelect, false));
+        if (assigneeSelect) {
+            form.appendChild(field('Assignee', assigneeSelect, false));
+        } else if (issue.assignee) {
+            // Read-only viewers still get a label so unauthenticated
+            // users can see who owns the card.
+            var assigneeInfo = issue.assignee;
+            var displayText = (assigneeInfo.displayName || assigneeInfo.username || '').trim()
+                || 'Unassigned';
+            var readonlyAssignee = el('input', { type: 'text' });
+            readonlyAssignee.value = displayText;
+            readonlyAssignee.readOnly = true;
+            form.appendChild(field('Assignee', readonlyAssignee, false));
+        }
         form.appendChild(field('Category', categoryInput, true));
         form.appendChild(field('Milestone', milestoneInput, true));
         form.appendChild(field('Work started', startedInput, false));
@@ -1452,7 +1600,8 @@
                 milestone: milestoneInput.value.trim(),
                 status: statusSelect.value,
                 workStarted: startedInput.value,
-                workCompleted: completedInput.value
+                workCompleted: completedInput.value,
+                assignee: assigneeSelect ? assigneeSelect.value : ''
             };
             apiRequest('POST', 'issue-update', payload)
                 .then(function (result) {
@@ -1467,6 +1616,7 @@
                     issue.status = updated.status;
                     issue.workStarted = updated.workStarted;
                     issue.workCompleted = updated.workCompleted;
+                    issue.assignee = updated.assignee != null ? updated.assignee : null;
                     applyCardUpdate(cardEl, issue);
                 })
                 .catch(function (err) {
@@ -1997,7 +2147,8 @@
             milestone: issue.milestone,
             workStarted: issue.workStarted,
             workCompleted: issue.workCompleted,
-            timeSpent: issue.timeSpent != null ? issue.timeSpent : 0
+            timeSpent: issue.timeSpent != null ? issue.timeSpent : 0,
+            assignee: issue.assignee != null ? issue.assignee : null
         };
         // Rewrite the card's contents in place so the element identity
         // is preserved. The detail modal caches this cardEl in the
@@ -2213,6 +2364,12 @@
             placeholder: 'Milestone (optional)',
             className: 'kanban-add-input'
         });
+        var assigneeSelect = buildAssigneeSelect(null);
+        assigneeSelect.classList.add('kanban-add-input');
+        var assigneeLabel = el('label', { className: 'kanban-add-label' }, [
+            document.createTextNode('Assignee'),
+            assigneeSelect
+        ]);
         var submitBtn = el('button', {
             type: 'submit',
             className: 'kanban-add-submit',
@@ -2231,6 +2388,7 @@
         form.appendChild(descriptionInput);
         form.appendChild(categoryInput);
         form.appendChild(milestoneInput);
+        form.appendChild(assigneeLabel);
         form.appendChild(errorNode);
         form.appendChild(actions);
 
@@ -2290,7 +2448,8 @@
                 title: title,
                 description: descriptionInput.value.trim(),
                 category: categoryInput.value.trim() || 'Uncategorised',
-                milestone: milestoneInput.value.trim() || null
+                milestone: milestoneInput.value.trim() || null,
+                assignee: assigneeSelect.value || ''
             };
             errorNode.hidden = true;
             errorNode.textContent = '';
@@ -2307,7 +2466,8 @@
                         milestone: created.milestone != null ? created.milestone : payload.milestone,
                         workStarted: created.workStarted != null ? created.workStarted : null,
                         workCompleted: created.workCompleted != null ? created.workCompleted : null,
-                        timeSpent: created.timeSpent != null ? created.timeSpent : 0.0
+                        timeSpent: created.timeSpent != null ? created.timeSpent : 0.0,
+                        assignee: created.assignee != null ? created.assignee : null
                     };
                     var card = buildCardEl(cardData, true);
                     column.cardListEl.appendChild(card);
