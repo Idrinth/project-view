@@ -33,6 +33,11 @@
             });
 
         userPromise.then(renderUserMenu);
+        userPromise.then(function (user) {
+            if (user) {
+                scheduleSessionRefresh();
+            }
+        });
 
         var container = document.querySelector('[data-view]');
         if (!container) {
@@ -565,6 +570,30 @@
 
     function fetchEndpoint(name) {
         return apiRequest('GET', name);
+    }
+
+    // Keep the session cookie alive while the tab is open. The backend
+    // re-issues the cookie on any authenticated request that's past
+    // half its lifetime, so all we need to do from the client is nudge
+    // it every so often. Ten minutes is short enough to comfortably
+    // beat even an aggressive TTL without being chatty, and skipping
+    // the ping while the tab is hidden avoids background-tab spam.
+    var sessionRefreshStarted = false;
+    function scheduleSessionRefresh() {
+        if (sessionRefreshStarted) {
+            return;
+        }
+        sessionRefreshStarted = true;
+        var REFRESH_INTERVAL_MS = 10 * 60 * 1000;
+        setInterval(function () {
+            if (document.hidden) {
+                return;
+            }
+            // Fire and forget: any transient failure will surface on
+            // the next user-driven request, there's no point pestering
+            // the user about a background keepalive.
+            apiRequest('GET', 'me').catch(function () {});
+        }, REFRESH_INTERVAL_MS);
     }
 
     // Generic API helper. Always sends/receives JSON and forwards the

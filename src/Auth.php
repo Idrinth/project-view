@@ -28,6 +28,12 @@ final class Auth
     private Users $users;
 
     /**
+     * Guard so the cookie gets re-issued at most once per request even
+     * if currentUser()/currentUserId() is consulted several times.
+     */
+    private bool $cookieRefreshed = false;
+
+    /**
      * @param array<string, mixed>|null $config Optional pre-loaded
      *   configuration. Primarily intended for tests; in normal use
      *   the constructor loads config/auth.php from disk.
@@ -154,7 +160,71 @@ final class Auth
         }
         // Guard against users that were removed from the database
         // after their token was issued.
-        return $this->users->findByUsername($sub);
+        $row = $this->users->findByUsername($sub);
+        if ($row === null) {
+            return null;
+        }
+
+        // Slide the session forward for active users: once the token is
+        // past the halfway mark of its lifetime, re-issue it with a full
+        // TTL so a tab that keeps hitting the API never expires mid-use.
+        $this->maybeRefreshCookie($sub, $claims);
+
+        return $row;
+    }
+
+    /**
+     * Re-issue the session cookie with a fresh TTL when the current
+     * token is past half its lifetime. This keeps active sessions alive
+     * without forcing users to sign back in every few hours.
+     *
+     * @param array<string, mixed> $claims
+     */
+    private function maybeRefreshCookie(string $subject, array $claims): void
+    {
+        if ($this->cookieRefreshed) {
+            return;
+        }
+        // Headers may already have been flushed by a streaming endpoint
+        // (e.g. comment-attachment). Setting a cookie after that would
+        // raise a warning and do nothing useful.
+        if (headers_sent()) {
+            return;
+        }
+
+        $ttl = (int) $this->config['jwt_ttl'];
+        if ($ttl <= 0) {
+            return;
+        }
+        $exp = isset($claims['exp']) && is_numeric($claims['exp']) ? (int) $claims['exp'] : 0;
+        if ($exp <= 0) {
+            // Tokens without an exp claim don't expire, so there's
+            // nothing to slide.
+            return;
+        }
+
+        $now = time();
+        if ($exp - $now > intdiv($ttl, 2)) {
+            // Still in the first half of the token's lifetime - no need
+            // to spend cycles (or a Set-Cookie header) refreshing yet.
+            return;
+        }
+
+        $token = Jwt::encode(
+            [
+                'sub' => $subject,
+                'iat' => $now,
+                'nbf' => $now,
+                'exp' => $now + $ttl,
+            ],
+            (string) $this->config['jwt_secret']
+        );
+        $this->sendCookie($token);
+        // Update the in-process cookie so any later currentUser() calls
+        // on the same request see the refreshed value rather than the
+        // soon-to-expire one.
+        $_COOKIE[$this->cookieName()] = $token;
+        $this->cookieRefreshed = true;
     }
 
     /**
