@@ -935,10 +935,15 @@ final class Api
                 'workCompleted' => $issue['work_completed_at'] !== null ? (string) $issue['work_completed_at'] : null,
                 'timeSpent'     => $timeSpent,
             ],
-            'timeEntries' => $entries,
-            'comments'    => $comments,
-            'blockedBy'   => $blockedBy,
-            'blocks'      => $blocks,
+            'timeEntries'    => $entries,
+            // Distinct work categories seen across every logged entry
+            // so the detail view's "log time" form can offer them as
+            // suggestions and stop users from typing near-duplicates
+            // ("Dev" vs. "Development" vs. "development").
+            'timeCategories' => $this->timeEntries->distinctCategories(),
+            'comments'       => $comments,
+            'blockedBy'      => $blockedBy,
+            'blocks'         => $blocks,
         ];
     }
 

@@ -220,6 +220,63 @@
         }
     }
 
+    // Separate datalist for the time-entry form's "work category"
+    // field. Kept apart from the project-category list so the two
+    // autocompletes don't cross-pollute each other.
+    var TIME_CATEGORY_DATALIST_ID = 'time-category-suggestions';
+
+    // Create (or refresh) the shared time-category datalist. Input
+    // values are deduplicated case-insensitively so callers can merge
+    // server-provided categories with the ones already visible on the
+    // open issue without producing duplicate options.
+    function ensureTimeCategoryDatalist(categories) {
+        var list = document.getElementById(TIME_CATEGORY_DATALIST_ID);
+        if (!list) {
+            list = document.createElement('datalist');
+            list.id = TIME_CATEGORY_DATALIST_ID;
+            document.body.appendChild(list);
+        }
+        clear(list);
+        var seen = {};
+        (categories || []).forEach(function (name) {
+            var label = typeof name === 'string' ? name.trim() : '';
+            if (!label) {
+                return;
+            }
+            var key = label.toLowerCase();
+            if (seen[key]) {
+                return;
+            }
+            seen[key] = true;
+            var option = document.createElement('option');
+            option.value = label;
+            list.appendChild(option);
+        });
+        return list;
+    }
+
+    // Merge a freshly-used time category into the shared datalist so
+    // the next log-time form on the same page already has it.
+    function addTimeCategoryToDatalist(name) {
+        var list = document.getElementById(TIME_CATEGORY_DATALIST_ID);
+        if (!list) {
+            return;
+        }
+        var label = typeof name === 'string' ? name.trim() : '';
+        if (!label) {
+            return;
+        }
+        var key = label.toLowerCase();
+        for (var i = 0; i < list.options.length; i++) {
+            if (list.options[i].value.toLowerCase() === key) {
+                return;
+            }
+        }
+        var option = document.createElement('option');
+        option.value = label;
+        list.appendChild(option);
+    }
+
     // Split a user-typed path like "Mods / Skyrim" into trimmed,
     // non-empty segments. Extra slashes and whitespace are ignored so
     // "mods//skyrim" and " mods / skyrim " both yield ["mods","skyrim"].
@@ -1245,6 +1302,20 @@
         var blockedBy = (data && data.blockedBy) || [];
         var blocks = (data && data.blocks) || [];
 
+        // Seed the time-category autocomplete from the full list
+        // reported by the API, falling back to anything seen on the
+        // current issue's entries so unsaved drafts still get
+        // suggestions when the endpoint predates the field.
+        var timeCategories = (data && Array.isArray(data.timeCategories))
+            ? data.timeCategories.slice()
+            : [];
+        timeEntries.forEach(function (entry) {
+            if (entry && entry.category) {
+                timeCategories.push(entry.category);
+            }
+        });
+        ensureTimeCategoryDatalist(timeCategories);
+
         container.appendChild(el('h3', { id: 'detail-title', text: issue.title || 'Task' }));
 
         container.appendChild(buildEditSection(issue, cardEl, canEdit));
@@ -1546,7 +1617,9 @@
         });
         var categoryInput = el('input', {
             type: 'text',
-            placeholder: 'Category (e.g. Development)'
+            placeholder: 'Category (e.g. Development)',
+            list: TIME_CATEGORY_DATALIST_ID,
+            autocomplete: 'off'
         });
         var noteInput = el('textarea', { rows: '2', placeholder: 'Note (optional)' });
         var submitBtn = el('button', {
@@ -1598,6 +1671,12 @@
                         userName: entry.userName || '',
                         displayName: entry.displayName || ''
                     });
+                    // Merge a newly-seen category into the shared
+                    // datalist so the next log-time submission in this
+                    // modal can reuse it without a page reload.
+                    if (entry.category) {
+                        addTimeCategoryToDatalist(entry.category);
+                    }
                     renderTimeEntries(listWrap, entries);
                     hoursInput.value = '';
                     categoryInput.value = '';
