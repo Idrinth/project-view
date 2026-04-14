@@ -136,6 +136,20 @@ final class Database
             $this->pdo->exec('ALTER TABLE issues ADD COLUMN description TEXT NULL');
         }
 
+        if (!$this->hasColumn('issues', 'assignee_id')) {
+            // Adds the per-issue assignee column for installs that
+            // predate it. Existing rows default to NULL (unassigned).
+            // The FK to users(id) is intentionally omitted on the ALTER
+            // path (fresh installs still get it from the CREATE TABLE
+            // in schema()); the application clears stale references on
+            // read when it cannot find the referenced user.
+            $this->pdo->exec('ALTER TABLE issues ADD COLUMN assignee_id INTEGER NULL');
+        }
+        // Ensure the companion index exists. Runs after the ALTER above
+        // so the column is always present when the index is built; IF
+        // NOT EXISTS keeps it a no-op on later runs.
+        $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_issues_assignee ON issues(assignee_id)');
+
         if (!$this->hasColumn('time_entries', 'user_id')) {
             // Adds the per-entry author column for installs that predate
             // it. Existing rows are backfilled with user-id 1 (the
@@ -374,10 +388,16 @@ final class Database
             // status is one of: todo / in-progress / waiting / done /
             // discarded. position lets the frontend persist drag-and-drop
             // order within a column.
+            // assignee_id attributes the card to a signed-in user so
+            // the kanban board can show their profile picture next to
+            // the title. NULL means unassigned; a deleted account
+            // resets every card they owned to NULL via the ON DELETE
+            // SET NULL foreign key.
             "CREATE TABLE IF NOT EXISTS issues (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER NOT NULL,
                 milestone_id INTEGER NULL,
+                assignee_id INTEGER NULL,
                 title TEXT NOT NULL,
                 description TEXT NULL,
                 status TEXT NOT NULL DEFAULT 'todo',
@@ -387,11 +407,17 @@ final class Database
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-                FOREIGN KEY (milestone_id) REFERENCES milestones(id) ON DELETE SET NULL
+                FOREIGN KEY (milestone_id) REFERENCES milestones(id) ON DELETE SET NULL,
+                FOREIGN KEY (assignee_id) REFERENCES users(id) ON DELETE SET NULL
             )",
             "CREATE INDEX IF NOT EXISTS idx_issues_project ON issues(project_id)",
             "CREATE INDEX IF NOT EXISTS idx_issues_milestone ON issues(milestone_id)",
             "CREATE INDEX IF NOT EXISTS idx_issues_status ON issues(status)",
+            // The assignee_id index is added by applyInPlaceMigrations()
+            // after the column has been guaranteed to exist, so the
+            // same code path works for fresh installs (column present
+            // from the CREATE TABLE above) and older installs being
+            // upgraded (column just added by ALTER TABLE).
 
             // Raw time tracking entries. Each row records hours spent
             // on a single issue on a specific date, optionally tagged

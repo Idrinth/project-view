@@ -107,6 +107,10 @@ final class Api
                 return $this->password($method, $body);
             case 'user':
                 return $this->user($method, $body);
+            case 'users-list':
+                return $this->usersList($method);
+            case 'issue-assign':
+                return $this->issueAssign($method, $body);
             default:
                 throw new \InvalidArgumentException("unknown endpoint: {$endpoint}");
         }
@@ -450,6 +454,117 @@ final class Api
     }
 
     /**
+     * Shape a row that has the assignee join columns (prefixed with
+     * `assignee_`) as the compact assignee payload the kanban board
+     * renders next to each card title. Returns null when the card has
+     * no assignee (or when the referenced user was since deleted, in
+     * which case the LEFT JOIN leaves the columns as NULL).
+     *
+     * The avatar is folded into a single data URL so the frontend can
+     * drop it straight into an <img>, mirroring `profilePayload()`.
+     *
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>|null
+     */
+    private static function assigneeFromRow(array $row): ?array
+    {
+        if (!isset($row['assignee_user_id']) || $row['assignee_user_id'] === null) {
+            return null;
+        }
+        $avatar = null;
+        $mime = isset($row['assignee_avatar_mime']) && is_string($row['assignee_avatar_mime'])
+            ? $row['assignee_avatar_mime']
+            : '';
+        $data = isset($row['assignee_avatar_data']) && is_string($row['assignee_avatar_data'])
+            ? $row['assignee_avatar_data']
+            : '';
+        if ($mime !== '' && $data !== '') {
+            $avatar = 'data:' . $mime . ';base64,' . $data;
+        }
+        return [
+            'userId'      => (int) $row['assignee_user_id'],
+            'username'    => isset($row['assignee_username']) ? (string) $row['assignee_username'] : '',
+            'displayName' => isset($row['assignee_display_name']) && $row['assignee_display_name'] !== null
+                ? (string) $row['assignee_display_name']
+                : '',
+            'avatar'      => $avatar,
+        ];
+    }
+
+    /**
+     * Build the compact assignee payload from a user id. Mirrors
+     * `assigneeFromRow()` but for code paths where the assignee is
+     * loaded on its own (e.g. immediately after a write) rather than
+     * via a JOIN. Returns null for the unassigned case or when the
+     * user row has vanished between the write and the read-back.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function assigneePayload(?int $userId): ?array
+    {
+        if ($userId === null) {
+            return null;
+        }
+        $row = $this->users->find($userId);
+        if (!is_array($row)) {
+            return null;
+        }
+        $avatar = null;
+        $mime = isset($row['avatar_mime']) && is_string($row['avatar_mime']) ? $row['avatar_mime'] : '';
+        $data = isset($row['avatar_data']) && is_string($row['avatar_data']) ? $row['avatar_data'] : '';
+        if ($mime !== '' && $data !== '') {
+            $avatar = 'data:' . $mime . ';base64,' . $data;
+        }
+        return [
+            'userId'      => (int) $row['id'],
+            'username'    => isset($row['username']) ? (string) $row['username'] : '',
+            'displayName' => isset($row['display_name']) && is_string($row['display_name'])
+                ? $row['display_name']
+                : '',
+            'avatar'      => $avatar,
+        ];
+    }
+
+    /**
+     * Resolve an assignee reference coming from the frontend (either a
+     * username string or a raw user id as int/digit-string) to the
+     * user's numeric id. An empty string / missing key clears the
+     * assignee (returns null). Unknown users raise a BadRequestException
+     * so callers see a 400 rather than silently dropping the change.
+     */
+    private function resolveAssigneeId(mixed $raw): ?int
+    {
+        if ($raw === null) {
+            return null;
+        }
+        if (is_int($raw)) {
+            if ($raw <= 0) {
+                return null;
+            }
+            $row = $this->users->find($raw);
+            if (!is_array($row)) {
+                throw new BadRequestException('unknown assignee');
+            }
+            return (int) $row['id'];
+        }
+        if (is_string($raw)) {
+            $trimmed = trim($raw);
+            if ($trimmed === '') {
+                return null;
+            }
+            if (ctype_digit($trimmed)) {
+                return $this->resolveAssigneeId((int) $trimmed);
+            }
+            $row = $this->users->findByUsername($trimmed);
+            if (!is_array($row)) {
+                throw new BadRequestException('unknown assignee');
+            }
+            return (int) $row['id'];
+        }
+        throw new BadRequestException('assignee must be a username or user id');
+    }
+
+    /**
      * Trim and length-cap a free-form profile text field. Control
      * characters other than tab, newline and carriage return are
      * dropped so the stored value is safe to render as-is.
@@ -558,6 +673,78 @@ final class Api
     }
 
     /**
+     * Return every known user's username, display name and thumbnail
+     * avatar so the kanban board can offer an assignee picker without
+     * issuing one `user` lookup per option. The endpoint requires a
+     * signed-in caller because only signed-in users can edit cards
+     * anyway, and exposing the full account list to anonymous
+     * visitors is broader than the per-user `user` endpoint.
+     *
+     * @return array<string, mixed>
+     */
+    private function usersList(string $method): array
+    {
+        if ($method !== 'GET') {
+            throw new BadRequestException('users-list requires GET');
+        }
+        $this->requireUser();
+
+        $users = [];
+        foreach ($this->users->allProfiles() as $row) {
+            $avatar = null;
+            $mime = isset($row['avatar_mime']) && is_string($row['avatar_mime']) ? $row['avatar_mime'] : '';
+            $data = isset($row['avatar_data']) && is_string($row['avatar_data']) ? $row['avatar_data'] : '';
+            if ($mime !== '' && $data !== '') {
+                $avatar = 'data:' . $mime . ';base64,' . $data;
+            }
+            $users[] = [
+                'userId'      => (int) $row['id'],
+                'username'    => isset($row['username']) ? (string) $row['username'] : '',
+                'displayName' => isset($row['display_name']) && $row['display_name'] !== null
+                    ? (string) $row['display_name']
+                    : '',
+                'avatar'      => $avatar,
+            ];
+        }
+        return ['users' => $users];
+    }
+
+    /**
+     * Assign (or unassign) a card's owner without touching any of its
+     * other fields. Called by the kanban board's inline assignee
+     * picker so switching the profile picture doesn't require opening
+     * the full edit form.
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private function issueAssign(string $method, array $body): array
+    {
+        if ($method !== 'POST') {
+            throw new BadRequestException('issue-assign requires POST');
+        }
+        $this->requireUser();
+
+        $id = $this->readId($body);
+        $issue = $this->issues->find($id);
+        if ($issue === null) {
+            throw new BadRequestException('unknown issue');
+        }
+        $this->requireEditAccess((int) $issue['project_id']);
+
+        $assigneeId = array_key_exists('assignee', $body)
+            ? $this->resolveAssigneeId($body['assignee'])
+            : null;
+
+        $this->issues->setAssignee($id, $assigneeId);
+
+        return [
+            'ok'       => true,
+            'assignee' => $this->assigneePayload($assigneeId),
+        ];
+    }
+
+    /**
      * Separator used in category path strings exchanged with the
      * frontend (e.g. "Mods / Skyrim / Idrinth Thalui").
      */
@@ -589,10 +776,16 @@ final class Api
             'SELECT i.id, i.title, i.description, i.status, i.position,
                     i.work_started_at, i.work_completed_at,
                     p.id AS project_id,
-                    m.name AS milestone_name
+                    m.name AS milestone_name,
+                    u.id AS assignee_user_id,
+                    u.username AS assignee_username,
+                    u.display_name AS assignee_display_name,
+                    u.avatar_mime AS assignee_avatar_mime,
+                    u.avatar_data AS assignee_avatar_data
                FROM issues i
                JOIN projects p ON p.id = i.project_id
           LEFT JOIN milestones m ON m.id = i.milestone_id
+          LEFT JOIN users u ON u.id = i.assignee_id
            ORDER BY i.status, i.position, i.id'
         );
         /** @var list<array<string, mixed>> $rows */
@@ -651,6 +844,7 @@ final class Api
                 'workStarted'   => $row['work_started_at'] !== null ? (string) $row['work_started_at'] : null,
                 'workCompleted' => $row['work_completed_at'] !== null ? (string) $row['work_completed_at'] : null,
                 'timeSpent'     => $timeSpent[$id] ?? 0.0,
+                'assignee'      => self::assigneeFromRow($row),
             ];
         }
 
@@ -679,6 +873,11 @@ final class Api
         $description = isset($body['description']) && is_string($body['description']) ? trim($body['description']) : '';
         $category    = isset($body['category'])  && is_string($body['category'])  ? trim($body['category'])  : '';
         $milestone   = isset($body['milestone']) && is_string($body['milestone']) ? trim($body['milestone']) : '';
+        // Assignee is optional; accept username strings or raw ids.
+        // Absent keys leave the card unassigned.
+        $assigneeId  = array_key_exists('assignee', $body)
+            ? $this->resolveAssigneeId($body['assignee'])
+            : null;
 
         if ($status === '' || $title === '') {
             throw new BadRequestException('column and title are required');
@@ -712,7 +911,8 @@ final class Api
             $status,
             $workStarted,
             $workCompleted,
-            $description !== '' ? $description : null
+            $description !== '' ? $description : null,
+            $assigneeId
         );
         // Place the new card at the bottom of its column.
         $this->issues->setStatus($issueId, $status, $position);
@@ -729,6 +929,7 @@ final class Api
                 'workStarted'   => $workStarted,
                 'workCompleted' => $workCompleted,
                 'timeSpent'     => 0.0,
+                'assignee'      => $this->assigneePayload($assigneeId),
             ],
         ];
     }
@@ -922,6 +1123,10 @@ final class Api
         $blockedBy = $this->mapLinkedIssues($this->issueLinks->blockedBy($id), $allPaths);
         $blocks    = $this->mapLinkedIssues($this->issueLinks->blocks($id), $allPaths);
 
+        $assigneeId = isset($issue['assignee_id']) && $issue['assignee_id'] !== null
+            ? (int) $issue['assignee_id']
+            : null;
+
         return [
             'issue' => [
                 'id'            => $id,
@@ -934,6 +1139,7 @@ final class Api
                 'workStarted'   => $issue['work_started_at'] !== null ? (string) $issue['work_started_at'] : null,
                 'workCompleted' => $issue['work_completed_at'] !== null ? (string) $issue['work_completed_at'] : null,
                 'timeSpent'     => $timeSpent,
+                'assignee'      => $this->assigneePayload($assigneeId),
             ],
             'timeEntries'    => $entries,
             // Distinct work categories seen across every logged entry
@@ -1006,6 +1212,16 @@ final class Api
         $status      = isset($body['status']) && is_string($body['status']) ? $body['status'] : (string) $existing['status'];
         $workStarted = isset($body['workStarted']) && is_string($body['workStarted']) ? trim($body['workStarted']) : '';
         $workDone    = isset($body['workCompleted']) && is_string($body['workCompleted']) ? trim($body['workCompleted']) : '';
+        // Preserve the existing assignee when the client omits the
+        // field (older clients, partial edits). An explicit empty
+        // string clears the assignment; a username or id switches it.
+        if (array_key_exists('assignee', $body)) {
+            $assigneeId = $this->resolveAssigneeId($body['assignee']);
+        } else {
+            $assigneeId = isset($existing['assignee_id']) && $existing['assignee_id'] !== null
+                ? (int) $existing['assignee_id']
+                : null;
+        }
 
         if ($title === '') {
             throw new BadRequestException('title is required');
@@ -1038,7 +1254,8 @@ final class Api
             $status,
             $workStarted !== '' ? $workStarted : null,
             $workDone !== '' ? $workDone : null,
-            $description !== '' ? $description : null
+            $description !== '' ? $description : null,
+            $assigneeId
         );
 
         if ((int) $existing['project_id'] !== $projectId) {
@@ -1089,6 +1306,7 @@ final class Api
                 'milestone'     => $milestone !== '' ? $milestone : null,
                 'workStarted'   => $workStarted !== '' ? $workStarted : null,
                 'workCompleted' => $workDone !== '' ? $workDone : null,
+                'assignee'      => $this->assigneePayload($assigneeId),
             ],
         ];
     }

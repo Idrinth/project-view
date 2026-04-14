@@ -42,22 +42,24 @@ final class Issues
         string $status = self::STATUS_TODO,
         ?string $workStartedAt = null,
         ?string $workCompletedAt = null,
-        ?string $description = null
+        ?string $description = null,
+        ?int $assigneeId = null
     ): int {
         self::assertStatus($status);
         $now = gmdate('c');
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO issues (
-                 project_id, milestone_id, title, description, status,
+                 project_id, milestone_id, assignee_id, title, description, status,
                  work_started_at, work_completed_at, created_at, updated_at
              ) VALUES (
-                 :project_id, :milestone_id, :title, :description, :status,
+                 :project_id, :milestone_id, :assignee_id, :title, :description, :status,
                  :work_started_at, :work_completed_at, :created_at, :updated_at
              )'
         );
         $stmt->execute([
             'project_id'        => $projectId,
             'milestone_id'      => $milestoneId,
+            'assignee_id'       => $assigneeId,
             'title'             => $title,
             'description'       => $description,
             'status'            => $status,
@@ -157,7 +159,8 @@ final class Issues
         string $status,
         ?string $workStartedAt,
         ?string $workCompletedAt,
-        ?string $description = null
+        ?string $description = null,
+        ?int $assigneeId = null
     ): void {
         self::assertStatus($status);
         $stmt = $this->db->pdo()->prepare(
@@ -165,6 +168,7 @@ final class Issues
                 title = :title,
                 description = :description,
                 milestone_id = :milestone_id,
+                assignee_id = :assignee_id,
                 status = :status,
                 work_started_at = :work_started_at,
                 work_completed_at = :work_completed_at,
@@ -176,10 +180,31 @@ final class Issues
             'title'             => $title,
             'description'       => $description,
             'milestone_id'      => $milestoneId,
+            'assignee_id'       => $assigneeId,
             'status'            => $status,
             'work_started_at'   => $workStartedAt,
             'work_completed_at' => $workCompletedAt,
             'updated_at'        => gmdate('c'),
+        ]);
+    }
+
+    /**
+     * Overwrite the assignee column on an issue. Pass null to clear
+     * the assignee. Used by the kanban board's "assign" affordance so
+     * the per-card profile picture can be changed without rewriting
+     * every other editable field.
+     */
+    public function setAssignee(int $id, ?int $assigneeId): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE issues
+             SET assignee_id = :assignee_id, updated_at = :updated_at
+             WHERE id = :id'
+        );
+        $stmt->execute([
+            'id'          => $id,
+            'assignee_id' => $assigneeId,
+            'updated_at'  => gmdate('c'),
         ]);
     }
 
