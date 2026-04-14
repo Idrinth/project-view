@@ -2452,6 +2452,92 @@
         container.appendChild(form);
         container.appendChild(status);
         container.appendChild(fileInput);
+
+        // Second form on the page: change password. Kept separate from
+        // the profile form above so a save of the display name / avatar
+        // never accidentally re-submits password fields. Requires the
+        // current password to guard against a hijacked session.
+        var passwordHeading = el('h3', {
+            className: 'profile-title profile-section-title',
+            text: 'Change password'
+        });
+        var passwordStatus = el('p', { className: 'profile-status', hidden: 'hidden' });
+
+        var currentPasswordInput = el('input', {
+            type: 'password',
+            name: 'currentPassword',
+            autocomplete: 'current-password',
+            className: 'profile-input'
+        });
+        var newPasswordInput = el('input', {
+            type: 'password',
+            name: 'newPassword',
+            autocomplete: 'new-password',
+            className: 'profile-input'
+        });
+        var confirmPasswordInput = el('input', {
+            type: 'password',
+            name: 'confirmPassword',
+            autocomplete: 'new-password',
+            className: 'profile-input'
+        });
+
+        var passwordForm = el('form', { className: 'profile-form' }, [
+            el('label', { className: 'profile-field' }, [
+                el('span', { text: 'Current password' }),
+                currentPasswordInput
+            ]),
+            el('label', { className: 'profile-field' }, [
+                el('span', { text: 'New password' }),
+                newPasswordInput
+            ]),
+            el('label', { className: 'profile-field' }, [
+                el('span', { text: 'Confirm new password' }),
+                confirmPasswordInput
+            ]),
+            el('div', { className: 'profile-actions' }, [
+                el('button', {
+                    type: 'submit',
+                    className: 'profile-button profile-save',
+                    text: 'Update password'
+                })
+            ])
+        ]);
+
+        passwordForm.addEventListener('submit', function (event) {
+            event.preventDefault();
+            var current = currentPasswordInput.value;
+            var next = newPasswordInput.value;
+            var confirm = confirmPasswordInput.value;
+            if (current === '' || next === '') {
+                showProfileStatus(passwordStatus,
+                    'Please fill in both the current and new password.', true);
+                return;
+            }
+            if (next !== confirm) {
+                showProfileStatus(passwordStatus,
+                    'The new passwords do not match.', true);
+                return;
+            }
+            apiRequest('POST', 'password', {
+                currentPassword: current,
+                newPassword: next
+            })
+                .then(function () {
+                    currentPasswordInput.value = '';
+                    newPasswordInput.value = '';
+                    confirmPasswordInput.value = '';
+                    showProfileStatus(passwordStatus, 'Password updated.', false);
+                })
+                .catch(function (err) {
+                    showProfileStatus(passwordStatus,
+                        err.message || 'Password update failed.', true);
+                });
+        });
+
+        container.appendChild(passwordHeading);
+        container.appendChild(passwordForm);
+        container.appendChild(passwordStatus);
     }
 
     function showProfileStatus(node, message, isError) {
