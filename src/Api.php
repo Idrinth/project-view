@@ -103,6 +103,8 @@ final class Api
                 return $this->profile($method, $body);
             case 'profile-picture':
                 return $this->profilePicture($method, $body);
+            case 'user':
+                return $this->user($method, $body);
             default:
                 throw new \InvalidArgumentException("unknown endpoint: {$endpoint}");
         }
@@ -327,6 +329,49 @@ final class Api
 
         $fresh = $this->users->findByUsername($username) ?? $row;
         return ['profile' => self::profilePayload($fresh)];
+    }
+
+    /**
+     * Look up another user's public profile by username. Used by the
+     * frontend to populate the hover card next to someone's display
+     * name (avatar, website link, about blurb).
+     *
+     * The endpoint is public: names are already visible on every page
+     * that renders authored content, so surfacing the matching profile
+     * in a tooltip does not leak anything that wasn't already shown.
+     *
+     * Unknown usernames return an empty profile stub rather than a
+     * 404 so the frontend can always render a minimal card (the
+     * display name + "no profile" hint) without having to branch on
+     * the status code.
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private function user(string $method, array $body): array
+    {
+        if ($method !== 'GET') {
+            throw new BadRequestException('user requires GET');
+        }
+        $username = isset($body['username']) && is_string($body['username'])
+            ? trim($body['username'])
+            : '';
+        if ($username === '') {
+            throw new BadRequestException('username is required');
+        }
+        $row = $this->users->findByUsername($username);
+        if ($row === null) {
+            return [
+                'profile' => [
+                    'username'    => $username,
+                    'displayName' => '',
+                    'websiteUrl'  => '',
+                    'about'       => '',
+                    'avatar'      => null,
+                ],
+            ];
+        }
+        return ['profile' => self::profilePayload($row)];
     }
 
     /**
@@ -791,12 +836,15 @@ final class Api
                 'category' => (string) $row['category'],
                 'note'     => $row['note'] !== null ? (string) $row['note'] : '',
                 'userId'   => (int) $row['user_id'],
-                // username comes from the LEFT JOIN in
-                // TimeEntries::forIssue and is NULL if the author was
+                // username and display_name come from the LEFT JOIN in
+                // TimeEntries::forIssue and are NULL if the author was
                 // since deleted; fall back to the empty string so the
                 // frontend can decide how to render the gap.
-                'userName' => isset($row['username']) && $row['username'] !== null
+                'userName'    => isset($row['username']) && $row['username'] !== null
                     ? (string) $row['username']
+                    : '',
+                'displayName' => isset($row['display_name']) && $row['display_name'] !== null
+                    ? (string) $row['display_name']
                     : '',
             ];
         }
@@ -808,6 +856,14 @@ final class Api
             $comments[] = [
                 'id'          => $commentId,
                 'author'      => (string) $row['author'],
+                // display_name comes from the LEFT JOIN in
+                // Comments::forIssue; if the account was removed or
+                // the user has not set a display name, fall back to
+                // the empty string so the frontend can reach for the
+                // `author` column instead.
+                'displayName' => isset($row['display_name']) && $row['display_name'] !== null
+                    ? (string) $row['display_name']
+                    : '',
                 'body'        => (string) $row['body'],
                 'createdAt'   => (string) $row['created_at'],
                 'attachments' => self::formatAttachments($attachmentsByComment[$commentId] ?? []),
@@ -1009,6 +1065,16 @@ final class Api
         // matching the schema's column default.
         $userId   = $this->auth->currentUserId() ?? 1;
         $userName = $this->auth->currentUser() ?? '';
+        // Pull the matching user row so the freshly-created entry can
+        // surface the author's display name alongside the username,
+        // matching what issue() returns for existing rows.
+        $userDisplayName = '';
+        if ($userName !== '') {
+            $userRow = $this->users->findByUsername($userName);
+            if (is_array($userRow) && isset($userRow['display_name']) && is_string($userRow['display_name'])) {
+                $userDisplayName = $userRow['display_name'];
+            }
+        }
 
         $id = $this->readId($body);
         $issue = $this->issues->find($id);
@@ -1055,13 +1121,14 @@ final class Api
         return [
             'ok'    => true,
             'entry' => [
-                'id'       => $entryId,
-                'spentOn'  => $spentOn,
-                'hours'    => $hours,
-                'category' => $category,
-                'note'     => $note,
-                'userId'   => $userId,
-                'userName' => $userName,
+                'id'          => $entryId,
+                'spentOn'     => $spentOn,
+                'hours'       => $hours,
+                'category'    => $category,
+                'note'        => $note,
+                'userId'      => $userId,
+                'userName'    => $userName,
+                'displayName' => $userDisplayName,
             ],
             'timeSpent' => $agg !== null ? (float) $agg['hours'] : 0.0,
         ];
@@ -1140,11 +1207,21 @@ final class Api
 
         $rows = $this->commentAttachments->forComment($commentId);
 
+        // Mirror the display_name lookup that issue() performs for
+        // existing comments so the optimistic render on the client
+        // can reach for the author's chosen label immediately.
+        $authorDisplayName = '';
+        $authorRow = $this->users->findByUsername($author);
+        if (is_array($authorRow) && isset($authorRow['display_name']) && is_string($authorRow['display_name'])) {
+            $authorDisplayName = $authorRow['display_name'];
+        }
+
         return [
             'ok'      => true,
             'comment' => [
                 'id'          => $commentId,
                 'author'      => $author,
+                'displayName' => $authorDisplayName,
                 'body'        => $text,
                 'createdAt'   => gmdate('c'),
                 'attachments' => self::formatAttachments($rows),
