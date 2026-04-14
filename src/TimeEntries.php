@@ -86,6 +86,33 @@ final class TimeEntries
     }
 
     /**
+     * Distinct non-empty work categories recorded across every entry,
+     * ordered case-insensitively. Powers the autocomplete on the time
+     * entry form so users pick an existing label instead of typing a
+     * near-duplicate (e.g. "development" vs. "Development").
+     *
+     * @return list<string>
+     */
+    public function distinctCategories(): array
+    {
+        $stmt = $this->db->pdo()->query(
+            "SELECT DISTINCT category FROM time_entries
+              WHERE category <> ''
+           ORDER BY category ASC"
+        );
+        if ($stmt === false) {
+            return [];
+        }
+        /** @var list<array<string, mixed>> $rows */
+        $rows = $stmt->fetchAll();
+        $out = [];
+        foreach ($rows as $row) {
+            $out[] = (string) $row['category'];
+        }
+        return $out;
+    }
+
+    /**
      * Entries in a closed date range, inclusive on both ends.
      *
      * @return list<array<string, mixed>>
