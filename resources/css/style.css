@@ -32,6 +32,10 @@
     --color-discarded-text: #8a2a2a;
     --color-waiting-bg: #fdecc8;
     --color-waiting-text: #8a5a00;
+    --color-done-bg: #d6f3dc;
+    --color-done-text: #14532d;
+    --color-in-progress-bg: #d6e4f3;
+    --color-in-progress-text: #1e3a8a;
 
     --color-header-bg: #1f2933;
     --color-header-text: #fff;
@@ -75,6 +79,10 @@
         --color-discarded-text: #fca5a5;
         --color-waiting-bg: #3a2a10;
         --color-waiting-text: #fbbf24;
+        --color-done-bg: #1f3d27;
+        --color-done-text: #86efac;
+        --color-in-progress-bg: #1f2a3d;
+        --color-in-progress-text: #93c5fd;
 
         --color-header-bg: #0a0e12;
         --color-header-text: #f5f7fa;
@@ -114,6 +122,10 @@
     --color-discarded-text: #fca5a5;
     --color-waiting-bg: #3a2a10;
     --color-waiting-text: #fbbf24;
+    --color-done-bg: #1f3d27;
+    --color-done-text: #86efac;
+    --color-in-progress-bg: #1f2a3d;
+    --color-in-progress-text: #93c5fd;
 
     --color-header-bg: #0a0e12;
     --color-header-text: #f5f7fa;
@@ -401,6 +413,14 @@ a:hover {
     background: var(--color-waiting-bg);
 }
 
+.kanban-column-done {
+    background: var(--color-done-bg);
+}
+
+.kanban-column-in-progress {
+    background: var(--color-in-progress-bg);
+}
+
 .kanban-title {
     margin-top: 0;
     font-size: 1rem;
@@ -415,6 +435,14 @@ a:hover {
 
 .kanban-column-waiting .kanban-title {
     color: var(--color-waiting-text);
+}
+
+.kanban-column-done .kanban-title {
+    color: var(--color-done-text);
+}
+
+.kanban-column-in-progress .kanban-title {
+    color: var(--color-in-progress-text);
 }
 
 .kanban-count {
