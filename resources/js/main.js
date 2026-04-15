@@ -3020,6 +3020,12 @@
                 if (column.id === 'waiting') {
                     classes += ' kanban-column-waiting';
                 }
+                if (column.id === 'done') {
+                    classes += ' kanban-column-done';
+                }
+                if (column.id === 'in-progress') {
+                    classes += ' kanban-column-in-progress';
+                }
                 var section = el('section', { className: classes });
                 section.appendChild(el('h3', { className: 'kanban-title' }, [
                     document.createTextNode(column.title + ' '),
