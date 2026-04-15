@@ -86,7 +86,15 @@
         }
 
         if (filterInput) {
-            filterInput.addEventListener('input', render);
+            filterInput.addEventListener('input', function () {
+                normalizeCategoryFilterInput(filterInput, false);
+                render();
+            });
+            filterInput.addEventListener('blur', function () {
+                if (normalizeCategoryFilterInput(filterInput, true)) {
+                    render();
+                }
+            });
         }
         if (clearBtn) {
             clearBtn.addEventListener('click', function () {
@@ -294,6 +302,48 @@
         }).filter(function (segment) {
             return segment.length > 0;
         });
+    }
+
+    // Rewrite a raw category-filter value to the canonical " / " form
+    // (e.g. "a/d" -> "a / d") so it lines up with the datalist options
+    // that feed autocomplete. When `finalize` is true the trailing
+    // separator is dropped; while the user is still typing we keep a
+    // trailing " / " so the next segment has room.
+    function normalizeCategoryFilterValue(value, finalize) {
+        if (value == null || value === '') {
+            return '';
+        }
+        var str = String(value);
+        var keepTrailing = !finalize && /\/\s*$/.test(str);
+        var segments = parseCategoryFilter(str);
+        var joined = segments.join(' / ');
+        if (keepTrailing && joined.length > 0) {
+            joined += ' / ';
+        }
+        return joined;
+    }
+
+    // Apply the canonical spacing to the filter input's current value.
+    // Returns true when the value actually changed so callers can
+    // decide whether to re-render. Cursor stays at the end if it was
+    // already there, which is the common case while typing forward.
+    function normalizeCategoryFilterInput(input, finalize) {
+        var original = input.value;
+        var normalized = normalizeCategoryFilterValue(original, finalize);
+        if (normalized === original) {
+            return false;
+        }
+        var wasAtEnd = input.selectionStart == null
+            || input.selectionStart === original.length;
+        input.value = normalized;
+        if (wasAtEnd) {
+            try {
+                input.setSelectionRange(normalized.length, normalized.length);
+            } catch (e) {
+                /* some input types (e.g. email) disallow selection APIs */
+            }
+        }
+        return true;
     }
 
     // Prefix-match an item's category path against the filter: every
