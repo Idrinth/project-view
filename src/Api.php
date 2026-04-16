@@ -87,6 +87,10 @@ final class Api
                 return $this->issueUpdate($method, $body);
             case 'issue-time-add':
                 return $this->issueTimeAdd($method, $body);
+            case 'issue-time-edit':
+                return $this->issueTimeEdit($method, $body);
+            case 'issue-time-delete':
+                return $this->issueTimeDelete($method, $body);
             case 'issue-comment-add':
                 return $this->issueCommentAdd($method, $body);
             case 'comment-attachment-remove':
@@ -258,8 +262,10 @@ final class Api
         if (is_array($row) && isset($row['display_name']) && is_string($row['display_name'])) {
             $displayName = trim($row['display_name']);
         }
+        $userId = is_array($row) && isset($row['id']) ? (int) $row['id'] : null;
         return [
             'user' => [
+                'id'          => $userId,
                 'name'        => $user,
                 'displayName' => $displayName,
             ],
@@ -1400,6 +1406,118 @@ final class Api
             ],
             'timeSpent' => $agg !== null ? (float) $agg['hours'] : 0.0,
         ];
+    }
+
+    /** @param array<string, mixed> $body @return array<string, mixed> */
+    private function issueTimeEdit(string $method, array $body): array
+    {
+        if ($method !== 'POST') {
+            throw new BadRequestException('issue-time-edit requires POST');
+        }
+        $this->requireUser();
+        $userId = $this->auth->currentUserId() ?? 1;
+
+        $entryId = $this->readId($body);
+        $entry = $this->timeEntries->find($entryId);
+        if ($entry === null) {
+            throw new BadRequestException('unknown time entry');
+        }
+        if ((int) $entry['user_id'] !== $userId && $userId !== ProjectAccess::ADMIN_USER_ID) {
+            throw new ForbiddenException('you can only edit your own time entries');
+        }
+
+        $issue = $this->issues->find((int) $entry['issue_id']);
+        if ($issue === null) {
+            throw new BadRequestException('unknown issue');
+        }
+        $this->requireEditAccess((int) $issue['project_id']);
+
+        $spentOn  = isset($body['spentOn'])  && is_string($body['spentOn'])  ? trim($body['spentOn'])  : '';
+        $category = isset($body['category']) && is_string($body['category']) ? trim($body['category']) : '';
+        $note     = isset($body['note'])     && is_string($body['note'])     ? trim($body['note'])     : '';
+        $hours    = isset($body['hours']) ? (float) $body['hours'] : 0.0;
+
+        if ($spentOn === '') {
+            $spentOn = (string) $entry['spent_on'];
+        }
+        if ($hours <= 0) {
+            throw new BadRequestException('hours must be greater than zero');
+        }
+
+        $this->timeEntries->update($entryId, $spentOn, $hours, $category, $note !== '' ? $note : null);
+
+        $issueId = (int) $entry['issue_id'];
+        $this->timeAggregates->refreshIssue($issueId);
+        $this->timeAggregates->refreshProject((int) $issue['project_id']);
+        if ($issue['milestone_id'] !== null) {
+            $this->timeAggregates->refreshMilestone((int) $issue['milestone_id']);
+        }
+
+        $agg = $this->timeAggregates->get(
+            TimeAggregates::SCOPE_ISSUE,
+            $issueId,
+            TimeAggregates::PERIOD_TOTAL,
+            '',
+            TimeAggregates::CATEGORY_ALL
+        );
+
+        return [
+            'ok'    => true,
+            'entry' => [
+                'id'       => $entryId,
+                'spentOn'  => $spentOn,
+                'hours'    => $hours,
+                'category' => $category,
+                'note'     => $note !== '' ? $note : null,
+            ],
+            'timeSpent' => $agg !== null ? (float) $agg['hours'] : 0.0,
+        ];
+    }
+
+    /** @param array<string, mixed> $body @return array<string, mixed> */
+    private function issueTimeDelete(string $method, array $body): array
+    {
+        if ($method !== 'POST') {
+            throw new BadRequestException('issue-time-delete requires POST');
+        }
+        $this->requireUser();
+        $userId = $this->auth->currentUserId() ?? 1;
+
+        $entryId = $this->readId($body);
+        $entry = $this->timeEntries->find($entryId);
+        if ($entry === null) {
+            return ['ok' => true, 'timeSpent' => null];
+        }
+        if ((int) $entry['user_id'] !== $userId && $userId !== ProjectAccess::ADMIN_USER_ID) {
+            throw new ForbiddenException('you can only delete your own time entries');
+        }
+
+        $issue = $this->issues->find((int) $entry['issue_id']);
+        if ($issue !== null) {
+            $this->requireEditAccess((int) $issue['project_id']);
+        }
+
+        $this->timeEntries->delete($entryId);
+
+        $issueId = (int) $entry['issue_id'];
+        $timeSpent = null;
+        if ($issue !== null) {
+            $this->timeAggregates->refreshIssue($issueId);
+            $this->timeAggregates->refreshProject((int) $issue['project_id']);
+            if ($issue['milestone_id'] !== null) {
+                $this->timeAggregates->refreshMilestone((int) $issue['milestone_id']);
+            }
+            $agg = $this->timeAggregates->get(
+                TimeAggregates::SCOPE_ISSUE,
+                $issueId,
+                TimeAggregates::PERIOD_TOTAL,
+                '',
+                TimeAggregates::CATEGORY_ALL
+            );
+            $timeSpent = $agg !== null ? (float) $agg['hours'] : 0.0;
+        }
+
+        return ['ok' => true, 'timeSpent' => $timeSpent];
     }
 
     /**

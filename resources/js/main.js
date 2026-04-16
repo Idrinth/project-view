@@ -8,6 +8,7 @@
     // .htaccess rewrite in front of index.php. We use a relative base
     // so the app keeps working when deployed under a sub-path.
     var API_BASE = './';
+    var _currentUserId = null;
 
     document.addEventListener('DOMContentLoaded', function () {
         bindLoginForm();
@@ -24,6 +25,7 @@
                     return null;
                 }
                 return {
+                    id: data.user.id != null ? data.user.id : null,
                     name: data.user.name,
                     displayName: data.user.displayName || ''
                 };
@@ -35,6 +37,7 @@
         userPromise.then(renderUserMenu);
         userPromise.then(function (user) {
             if (user) {
+                _currentUserId = user.id;
                 scheduleSessionRefresh();
             }
         });
@@ -1830,7 +1833,123 @@
         section.appendChild(el('h4', { text: 'Time spent' }));
 
         var listWrap = el('div');
-        renderTimeEntries(listWrap, entries);
+
+        function applyTimeSpent(result) {
+            var total = result && typeof result.timeSpent === 'number'
+                ? result.timeSpent
+                : null;
+            if (total != null) {
+                issue.timeSpent = total;
+                updateCardTimeSpent(cardEl, total);
+            }
+        }
+
+        var callbacks = canEdit ? {
+            onEdit: function (entry, idx) {
+                var li = listWrap.querySelector('[data-entry-id="' + entry.id + '"]');
+                if (!li) {
+                    return;
+                }
+                var editForm = el('form', { className: 'detail-form detail-entry-edit-form' });
+                var eDateInput = el('input', { type: 'date', required: 'required' });
+                eDateInput.value = entry.spentOn || '';
+                var eHoursInput = el('input', {
+                    type: 'number',
+                    step: '0.25',
+                    min: '0',
+                    required: 'required'
+                });
+                eHoursInput.value = String(entry.hours || '');
+                var eCategoryInput = el('input', {
+                    type: 'text',
+                    placeholder: 'Category',
+                    list: TIME_CATEGORY_DATALIST_ID,
+                    autocomplete: 'off'
+                });
+                eCategoryInput.value = entry.category || '';
+                var eNoteInput = el('textarea', { rows: '2', placeholder: 'Note (optional)' });
+                eNoteInput.value = entry.note || '';
+                var eSaveBtn = el('button', {
+                    type: 'submit',
+                    className: 'detail-button',
+                    text: 'Save'
+                });
+                var eCancelBtn = el('button', {
+                    type: 'button',
+                    className: 'detail-entry-action',
+                    text: 'Cancel'
+                });
+                var eError = el('p', { className: 'detail-error', hidden: 'hidden' });
+
+                editForm.appendChild(field('Date', eDateInput, false));
+                editForm.appendChild(field('Hours', eHoursInput, false));
+                editForm.appendChild(field('Category', eCategoryInput, true));
+                editForm.appendChild(field('Note', eNoteInput, true));
+                editForm.appendChild(el('div', { className: 'detail-actions' }, [eSaveBtn, eCancelBtn]));
+                editForm.appendChild(eError);
+
+                eCancelBtn.addEventListener('click', function () {
+                    renderTimeEntries(listWrap, entries, callbacks);
+                });
+
+                editForm.addEventListener('submit', function (e) {
+                    e.preventDefault();
+                    eError.hidden = true;
+                    var hours = parseFloat(eHoursInput.value);
+                    if (!isFinite(hours) || hours <= 0) {
+                        eError.textContent = 'Hours must be greater than zero';
+                        eError.hidden = false;
+                        return;
+                    }
+                    eSaveBtn.disabled = true;
+                    apiRequest('POST', 'issue-time-edit', {
+                        id: entry.id,
+                        spentOn: eDateInput.value,
+                        hours: hours,
+                        category: eCategoryInput.value.trim(),
+                        note: eNoteInput.value.trim()
+                    })
+                    .then(function (result) {
+                        var updated = (result && result.entry) || {};
+                        entry.spentOn  = updated.spentOn  != null ? updated.spentOn  : eDateInput.value;
+                        entry.hours    = updated.hours    != null ? updated.hours    : hours;
+                        entry.category = updated.category != null ? updated.category : eCategoryInput.value.trim();
+                        entry.note     = updated.note != null ? updated.note : eNoteInput.value.trim();
+                        if (entry.category) {
+                            addTimeCategoryToDatalist(entry.category);
+                        }
+                        applyTimeSpent(result);
+                        renderTimeEntries(listWrap, entries, callbacks);
+                    })
+                    .catch(function (err) {
+                        eSaveBtn.disabled = false;
+                        eError.textContent = err.message || 'Failed to save';
+                        eError.hidden = false;
+                    });
+                });
+
+                clear(li);
+                li.appendChild(editForm);
+            },
+            onDelete: function (entry, idx) {
+                if (!window.confirm('Delete this time entry?')) {
+                    return;
+                }
+                apiRequest('POST', 'issue-time-delete', { id: entry.id })
+                    .then(function (result) {
+                        entries.splice(idx, 1);
+                        applyTimeSpent(result);
+                        renderTimeEntries(listWrap, entries, callbacks);
+                    })
+                    .catch(function (err) {
+                        if (window.console) {
+                            window.console.warn('issue-time-delete failed: ' + err.message);
+                        }
+                    });
+            }
+        } : null;
+
+        renderTimeEntries(listWrap, entries, callbacks);
         section.appendChild(listWrap);
 
         if (!canEdit) {
@@ -1903,23 +2022,14 @@
                         userName: entry.userName || '',
                         displayName: entry.displayName || ''
                     });
-                    // Merge a newly-seen category into the shared
-                    // datalist so the next log-time submission in this
-                    // modal can reuse it without a page reload.
                     if (entry.category) {
                         addTimeCategoryToDatalist(entry.category);
                     }
-                    renderTimeEntries(listWrap, entries);
+                    renderTimeEntries(listWrap, entries, callbacks);
                     hoursInput.value = '';
                     categoryInput.value = '';
                     noteInput.value = '';
-                    var total = result && typeof result.timeSpent === 'number'
-                        ? result.timeSpent
-                        : null;
-                    if (total != null) {
-                        issue.timeSpent = total;
-                        updateCardTimeSpent(cardEl, total);
-                    }
+                    applyTimeSpent(result);
                 })
                 .catch(function (err) {
                     submitBtn.disabled = false;
@@ -1933,22 +2043,18 @@
         return section;
     }
 
-    function renderTimeEntries(wrap, entries) {
+    function renderTimeEntries(wrap, entries, callbacks) {
         clear(wrap);
         if (!entries.length) {
             wrap.appendChild(el('p', { className: 'detail-empty', text: 'No time logged yet.' }));
             return;
         }
         var list = el('ul', { className: 'detail-entries' });
-        entries.forEach(function (entry) {
+        entries.forEach(function (entry, idx) {
             var meta = entry.spentOn + ' \u00b7 ' + formatHours(entry.hours) + 'h';
             if (entry.category) {
                 meta += ' \u00b7 ' + entry.category;
             }
-            // Attribution: always prefer the display name, falling
-            // back to the login username and finally to the raw user id
-            // so legacy rows backfilled with the bootstrap user are
-            // still visibly tagged.
             var metaParts = [document.createTextNode(meta)];
             var hasWho = !!(entry.displayName || entry.userName || entry.userId != null);
             if (hasWho) {
@@ -1963,7 +2069,36 @@
             if (entry.note) {
                 children.push(el('p', { className: 'detail-entry-note', text: entry.note }));
             }
-            list.appendChild(el('li', { className: 'detail-entry' }, children));
+            var isOwn = _currentUserId != null && entry.userId != null
+                && Number(entry.userId) === Number(_currentUserId);
+            if (isOwn && callbacks) {
+                var actions = el('div', { className: 'detail-entry-actions' });
+                var editBtn = el('button', {
+                    type: 'button',
+                    className: 'detail-entry-action',
+                    text: 'Edit'
+                });
+                var deleteBtn = el('button', {
+                    type: 'button',
+                    className: 'detail-entry-action detail-entry-action-danger',
+                    text: 'Delete'
+                });
+                editBtn.addEventListener('click', function () {
+                    callbacks.onEdit(entry, idx);
+                });
+                deleteBtn.addEventListener('click', function () {
+                    callbacks.onDelete(entry, idx);
+                });
+                actions.appendChild(editBtn);
+                actions.appendChild(deleteBtn);
+                children.push(actions);
+            }
+            var li = el('li', { className: 'detail-entry' });
+            li.setAttribute('data-entry-id', String(entry.id));
+            children.forEach(function (child) {
+                li.appendChild(child);
+            });
+            list.appendChild(li);
         });
         wrap.appendChild(list);
     }

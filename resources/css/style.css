@@ -996,6 +996,37 @@ input:disabled:focus {
     word-wrap: break-word;
 }
 
+.detail-entry-actions {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.3rem;
+}
+
+.detail-entry-action {
+    background: transparent;
+    border: 1px solid var(--color-border-strong);
+    border-radius: 4px;
+    color: var(--color-text-muted);
+    font: inherit;
+    font-size: 0.75rem;
+    padding: 0.15rem 0.5rem;
+    cursor: pointer;
+}
+
+.detail-entry-action:hover {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+}
+
+.detail-entry-action-danger:hover {
+    border-color: var(--color-danger);
+    color: var(--color-danger);
+}
+
+.detail-entry-edit-form {
+    margin: 0;
+}
+
 .detail-empty {
     margin: 0 0 0.75rem;
     font-size: 0.85rem;

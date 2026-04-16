@@ -130,6 +130,27 @@ final class TimeEntries
         return $rows;
     }
 
+    public function update(
+        int $id,
+        string $spentOn,
+        float $hours,
+        string $category = '',
+        ?string $note = null
+    ): void {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE time_entries
+                SET spent_on = :spent_on, hours = :hours, category = :category, note = :note
+              WHERE id = :id'
+        );
+        $stmt->execute([
+            'id'       => $id,
+            'spent_on' => $spentOn,
+            'hours'    => $hours,
+            'category' => $category,
+            'note'     => $note,
+        ]);
+    }
+
     public function delete(int $id): void
     {
         $stmt = $this->db->pdo()->prepare('DELETE FROM time_entries WHERE id = :id');
