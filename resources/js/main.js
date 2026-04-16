@@ -1931,13 +1931,18 @@
                 clear(li);
                 li.appendChild(editForm);
             },
-            onDelete: function (entry, idx) {
+            onDelete: function (entry) {
                 if (!window.confirm('Delete this time entry?')) {
                     return;
                 }
                 apiRequest('POST', 'issue-time-delete', { id: entry.id })
                     .then(function (result) {
-                        entries.splice(idx, 1);
+                        for (var i = entries.length - 1; i >= 0; i--) {
+                            if (entries[i].id === entry.id) {
+                                entries.splice(i, 1);
+                                break;
+                            }
+                        }
                         applyTimeSpent(result);
                         renderTimeEntries(listWrap, entries, callbacks);
                     })

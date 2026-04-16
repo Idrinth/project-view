@@ -1415,7 +1415,10 @@ final class Api
             throw new BadRequestException('issue-time-edit requires POST');
         }
         $this->requireUser();
-        $userId = $this->auth->currentUserId() ?? 1;
+        $userId = $this->auth->currentUserId();
+        if ($userId === null) {
+            throw new UnauthorizedException('not signed in');
+        }
 
         $entryId = $this->readId($body);
         $entry = $this->timeEntries->find($entryId);
@@ -1481,7 +1484,10 @@ final class Api
             throw new BadRequestException('issue-time-delete requires POST');
         }
         $this->requireUser();
-        $userId = $this->auth->currentUserId() ?? 1;
+        $userId = $this->auth->currentUserId();
+        if ($userId === null) {
+            throw new UnauthorizedException('not signed in');
+        }
 
         $entryId = $this->readId($body);
         $entry = $this->timeEntries->find($entryId);
