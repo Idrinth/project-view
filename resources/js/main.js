@@ -79,6 +79,14 @@
         ensureCategoryDatalist(collectCategoryPaths(view, data));
         if (filterInput) {
             filterInput.setAttribute('list', CATEGORY_DATALIST_ID);
+            // Seed from the URL so links like
+            // `kanban.html?category=Mods/Skyrim/Blame%20Yourself` open
+            // pre-filtered. The query value is normalized to the same
+            // " / " form the datalist exposes.
+            var urlCategory = getCategoryFromUrl();
+            if (urlCategory) {
+                filterInput.value = normalizeCategoryFilterValue(urlCategory, true);
+            }
         }
 
         function render() {
@@ -86,6 +94,9 @@
             var viewData = applyCategoryFilter(view, data, filter);
             clear(container);
             renderer(container, viewData, options);
+            if (filterInput) {
+                syncCategoryToUrl(filter);
+            }
         }
 
         if (filterInput) {
@@ -291,6 +302,52 @@
         var option = document.createElement('option');
         option.value = label;
         list.appendChild(option);
+    }
+
+    // Read the `category` query parameter from the current URL so
+    // shared links like `kanban.html?category=Mods/Skyrim` can seed
+    // the filter input. Returns '' when absent or unparsable.
+    function getCategoryFromUrl() {
+        if (typeof URLSearchParams !== 'function') {
+            return '';
+        }
+        try {
+            var params = new URLSearchParams(window.location.search);
+            return params.get('category') || '';
+        } catch (e) {
+            return '';
+        }
+    }
+
+    // Mirror the active filter into the URL's query string so the
+    // page stays copy-pasteable while the user types. Uses
+    // replaceState to avoid polluting history and preserves any
+    // existing hash (e.g. `#issue-42`).
+    function syncCategoryToUrl(filter) {
+        if (typeof URLSearchParams !== 'function'
+            || !window.history
+            || typeof window.history.replaceState !== 'function') {
+            return;
+        }
+        var params;
+        try {
+            params = new URLSearchParams(window.location.search);
+        } catch (e) {
+            return;
+        }
+        if (filter && filter.length) {
+            params.set('category', filter.join('/'));
+        } else {
+            params.delete('category');
+        }
+        var query = params.toString();
+        var url = window.location.pathname
+            + (query ? '?' + query : '')
+            + (window.location.hash || '');
+        if (url === window.location.pathname + window.location.search + window.location.hash) {
+            return;
+        }
+        window.history.replaceState(null, '', url);
     }
 
     // Split a user-typed path like "Mods / Skyrim" into trimmed,
