@@ -684,10 +684,23 @@
 
     // Keep the session cookie alive while the tab is open. The backend
     // re-issues the cookie on any authenticated request that's past
-    // half its lifetime, so all we need to do from the client is nudge
-    // it every so often. Ten minutes is short enough to comfortably
-    // beat even an aggressive TTL without being chatty, and skipping
-    // the ping while the tab is hidden avoids background-tab spam.
+    // half its lifetime, so the client just needs to nudge it often
+    // enough. Ten minutes comfortably beats even an aggressive TTL.
+    //
+    // A naive setInterval isn't enough: background tabs throttle (and
+    // sometimes freeze) timers, and the OS pauses them entirely while
+    // the machine is asleep. If we only tick when visible, a user who
+    // switches tabs or closes the laptop lid for longer than the JWT
+    // TTL comes back to an expired cookie. Instead we:
+    //   1. Use self-rescheduling setTimeout so timer drift during sleep
+    //      doesn't queue up a storm of catch-up ticks on wake.
+    //   2. Ping even when hidden - the server-side slide-forward needs
+    //      a request to happen at all, and a single 10-minute heartbeat
+    //      is well under any sane background-tab budget.
+    //   3. Also fire on visibilitychange / focus / pageshow so a tab
+    //      returning from the background or from bfcache after a long
+    //      gap refreshes immediately instead of waiting for the next
+    //      (possibly overdue) timer.
     var sessionRefreshStarted = false;
     function scheduleSessionRefresh() {
         if (sessionRefreshStarted) {
@@ -695,15 +708,42 @@
         }
         sessionRefreshStarted = true;
         var REFRESH_INTERVAL_MS = 10 * 60 * 1000;
-        setInterval(function () {
-            if (document.hidden) {
+        var lastRefresh = Date.now();
+        var pingInFlight = false;
+
+        function ping() {
+            if (pingInFlight) {
                 return;
             }
+            pingInFlight = true;
+            lastRefresh = Date.now();
             // Fire and forget: any transient failure will surface on
             // the next user-driven request, there's no point pestering
             // the user about a background keepalive.
-            apiRequest('GET', 'me').catch(function () {});
-        }, REFRESH_INTERVAL_MS);
+            apiRequest('GET', 'me')
+                .catch(function () {})
+                .then(function () { pingInFlight = false; });
+        }
+
+        function tick() {
+            if (Date.now() - lastRefresh >= REFRESH_INTERVAL_MS) {
+                ping();
+            }
+            setTimeout(tick, REFRESH_INTERVAL_MS);
+        }
+        setTimeout(tick, REFRESH_INTERVAL_MS);
+
+        function refreshIfVisible() {
+            if (document.hidden) {
+                return;
+            }
+            if (Date.now() - lastRefresh >= REFRESH_INTERVAL_MS) {
+                ping();
+            }
+        }
+        document.addEventListener('visibilitychange', refreshIfVisible);
+        window.addEventListener('focus', refreshIfVisible);
+        window.addEventListener('pageshow', refreshIfVisible);
     }
 
     // Generic API helper. Always sends/receives JSON and forwards the
