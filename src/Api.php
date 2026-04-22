@@ -854,7 +854,55 @@ final class Api
             ];
         }
 
-        return ['columns' => array_values($columns)];
+        return [
+            'columns'              => array_values($columns),
+            'accessibleCategories' => $this->accessibleCategoryPaths($paths),
+        ];
+    }
+
+    /**
+     * Category paths the signed-in user may create new cards under.
+     * The admin account sees every existing category path; everyone
+     * else sees only the paths of projects they hold a grant on plus
+     * every descendant (access inherits down the tree). The frontend
+     * feeds these into the add-card / issue-edit autocomplete so the
+     * suggestions line up with what the write endpoints accept — a
+     * non-admin who only has Mods/Skyrim never sees Mods or sibling
+     * branches like Mods/Warcraft III in the dropdown.
+     *
+     * Unauthenticated callers get an empty list: they cannot create
+     * anything, so there is nothing to suggest.
+     *
+     * @param array<int, list<string>> $paths breadcrumbs keyed by
+     *        project id, as produced by Projects::allPaths(). Passed
+     *        in so callers that already computed it (e.g. kanban()) do
+     *        not walk the project table a second time.
+     * @return list<string>
+     */
+    private function accessibleCategoryPaths(array $paths): array
+    {
+        $userId = $this->auth->currentUserId();
+        if ($userId === null) {
+            return [];
+        }
+        $labels = [];
+        if ($userId === ProjectAccess::ADMIN_USER_ID) {
+            foreach ($paths as $crumbs) {
+                if ($crumbs === []) {
+                    continue;
+                }
+                $labels[] = implode(self::CATEGORY_PATH_SEPARATOR, $crumbs);
+            }
+        } else {
+            foreach ($this->projectAccess->accessibleProjectIds($userId) as $id) {
+                if (!isset($paths[$id]) || $paths[$id] === []) {
+                    continue;
+                }
+                $labels[] = implode(self::CATEGORY_PATH_SEPARATOR, $paths[$id]);
+            }
+        }
+        sort($labels, SORT_STRING | SORT_FLAG_CASE);
+        return $labels;
     }
 
     /**

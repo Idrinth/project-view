@@ -74,9 +74,13 @@
         var clearBtn = document.querySelector('[data-category-filter-clear]');
 
         // Seed the shared category datalist from the loaded data so
-        // both the filter input and the add-card form get suggestions
-        // for every category (and prefix) currently in use.
+        // the filter input gets suggestions for every category (and
+        // prefix) currently in use, and a second, creation-only list
+        // from the access-scoped `accessibleCategories` payload so the
+        // add-card and issue-edit inputs only ever suggest paths the
+        // backend will actually let the user write to.
         ensureCategoryDatalist(collectCategoryPaths(view, data));
+        ensureCategoryCreateDatalist(data && data.accessibleCategories);
         if (filterInput) {
             filterInput.setAttribute('list', CATEGORY_DATALIST_ID);
             // Seed from the URL so links like
@@ -141,6 +145,7 @@
             fetchEndpoint(view).then(function (fresh) {
                 data = fresh;
                 ensureCategoryDatalist(collectCategoryPaths(view, data));
+                ensureCategoryCreateDatalist(data && data.accessibleCategories);
                 render();
             }).catch(function () {
                 /* ignore - keep showing the previous data */
@@ -168,9 +173,16 @@
         return false;
     }
 
-    // Shared id used by both the filter input and the kanban add-card
-    // category input so a single <datalist> feeds every autocomplete.
+    // Shared id used by the filter input so a single <datalist> feeds
+    // the top-of-page category filter autocomplete.
     var CATEGORY_DATALIST_ID = 'category-suggestions';
+
+    // Separate datalist for inputs that *create* (or re-home) cards.
+    // Non-admin users are only allowed to create categories inside the
+    // subtrees they have been granted edit access to, so the creation
+    // suggestions are a strict subset of the filter list (which keeps
+    // showing every prefix the user can see on the board).
+    var CATEGORY_CREATE_DATALIST_ID = 'category-create-suggestions';
 
     // Collect every distinct category path visible in the current
     // payload, plus all prefix paths, so users can pick any level of
@@ -229,6 +241,59 @@
     // suggestions stay current without needing a page reload.
     function addCategoryPathToDatalist(path) {
         var list = document.getElementById(CATEGORY_DATALIST_ID);
+        if (!list || !Array.isArray(path) || path.length === 0) {
+            return;
+        }
+        var existing = {};
+        for (var i = 0; i < list.options.length; i++) {
+            existing[list.options[i].value.toLowerCase()] = true;
+        }
+        for (var j = 1; j <= path.length; j++) {
+            var label = path.slice(0, j).join(' / ');
+            if (label && !existing[label.toLowerCase()]) {
+                existing[label.toLowerCase()] = true;
+                var option = document.createElement('option');
+                option.value = label;
+                list.appendChild(option);
+            }
+        }
+    }
+
+    // Create (or refresh) the creation-only datalist with the paths the
+    // backend says the signed-in user can create under. Always appends
+    // the list to <body> so late-created forms can reference it by id.
+    function ensureCategoryCreateDatalist(paths) {
+        var list = document.getElementById(CATEGORY_CREATE_DATALIST_ID);
+        if (!list) {
+            list = document.createElement('datalist');
+            list.id = CATEGORY_CREATE_DATALIST_ID;
+            document.body.appendChild(list);
+        }
+        clear(list);
+        var seen = {};
+        (Array.isArray(paths) ? paths : []).forEach(function (label) {
+            var value = typeof label === 'string' ? label.trim() : '';
+            if (!value) {
+                return;
+            }
+            var key = value.toLowerCase();
+            if (seen[key]) {
+                return;
+            }
+            seen[key] = true;
+            var option = document.createElement('option');
+            option.value = value;
+            list.appendChild(option);
+        });
+        return list;
+    }
+
+    // Add a newly-created path (and every ancestor prefix) to the
+    // creation datalist. A successful kanban-add is proof the user can
+    // keep creating under this subtree, so the intermediate prefixes
+    // and the leaf itself are all valid future suggestions.
+    function addCategoryPathToCreateDatalist(path) {
+        var list = document.getElementById(CATEGORY_CREATE_DATALIST_ID);
         if (!list || !Array.isArray(path) || path.length === 0) {
             return;
         }
@@ -1654,7 +1719,8 @@
         descriptionInput.value = issue.description || '';
         var categoryInput = el('input', {
             type: 'text',
-            placeholder: 'e.g. Mods / Skyrim / Idrinth Thalui'
+            placeholder: 'e.g. Mods / Skyrim / Idrinth Thalui',
+            list: CATEGORY_CREATE_DATALIST_ID
         });
         categoryInput.value = Array.isArray(issue.categoryPath) && issue.categoryPath.length
             ? issue.categoryPath.join(' / ')
@@ -2644,7 +2710,7 @@
             type: 'text',
             placeholder: 'Category (e.g. Mods / Skyrim / Idrinth Thalui)',
             className: 'kanban-add-input',
-            list: CATEGORY_DATALIST_ID
+            list: CATEGORY_CREATE_DATALIST_ID
         });
         var milestoneInput = el('input', {
             type: 'text',
@@ -2759,7 +2825,9 @@
                     var card = buildCardEl(cardData, true);
                     column.cardListEl.appendChild(card);
                     refreshKanbanColumnCount(column.cardListEl);
-                    addCategoryPathToDatalist(cardCategoryPath(cardData));
+                    var createdPath = cardCategoryPath(cardData);
+                    addCategoryPathToDatalist(createdPath);
+                    addCategoryPathToCreateDatalist(createdPath);
                     close();
                 })
                 .catch(function (err) {
