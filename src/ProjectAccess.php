@@ -120,6 +120,56 @@ final class ProjectAccess
     }
 
     /**
+     * Every project id `$userId` can edit: their direct grants plus
+     * every descendant (since access inherits down the tree). Used by
+     * the frontend to scope the category autocomplete so suggestions
+     * cannot tempt the user into a path the write endpoints would
+     * reject. The admin account is a sentinel — this method returns
+     * an empty list for it and callers are expected to treat that as
+     * "unrestricted" rather than materialise the whole project table.
+     *
+     * @return list<int>
+     */
+    public function accessibleProjectIds(int $userId): array
+    {
+        if ($userId === self::ADMIN_USER_ID) {
+            return [];
+        }
+        $grants = $this->projectIdsForUser($userId);
+        if ($grants === []) {
+            return [];
+        }
+
+        $stmt = $this->db->pdo()->query('SELECT id, parent_id FROM projects');
+        /** @var list<array<string, mixed>> $rows */
+        $rows = $stmt === false ? [] : $stmt->fetchAll();
+        $childrenByParent = [];
+        foreach ($rows as $row) {
+            $parent = $row['parent_id'] !== null ? (int) $row['parent_id'] : 0;
+            if (!isset($childrenByParent[$parent])) {
+                $childrenByParent[$parent] = [];
+            }
+            $childrenByParent[$parent][] = (int) $row['id'];
+        }
+
+        $accessible = [];
+        $queue = $grants;
+        while ($queue !== []) {
+            $current = (int) array_shift($queue);
+            if (isset($accessible[$current])) {
+                continue;
+            }
+            $accessible[$current] = true;
+            foreach ($childrenByParent[$current] ?? [] as $childId) {
+                if (!isset($accessible[$childId])) {
+                    $queue[] = $childId;
+                }
+            }
+        }
+        return array_keys($accessible);
+    }
+
+    /**
      * Decide whether `$userId` may edit content under `$projectId`.
      *
      * The rule: walk the project's parent chain up to the root and
