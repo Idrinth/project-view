@@ -97,35 +97,46 @@ final class Milestones
         $stmt->execute(['id' => $id, 'released_at' => $releasedAt]);
     }
 
+    public function clearRelease(int $id): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE milestones SET released_at = NULL WHERE id = :id'
+        );
+        $stmt->execute(['id' => $id]);
+    }
+
     /**
-     * A milestone is considered "released" as soon as every issue
-     * attached to it has been resolved (either status=done or
-     * status=discarded). This helper stamps `released_at` with today's
-     * date the first time that condition becomes true.
+     * A milestone is considered "released" once every issue attached
+     * to it has been resolved (status=done or status=discarded) AND at
+     * least one of those issues is actually done — a milestone whose
+     * cards were all discarded shipped no finished content, so it is
+     * not a release.
      *
      * Called from the API whenever an issue update might flip the
      * milestone across that threshold. Issues with no milestone
      * (milestone_id IS NULL) are filtered out by the caller, since
      * there is nothing to release.
      *
-     * Rules:
-     *  - A milestone with zero issues is not auto-released (there is
-     *    nothing to release yet).
-     *  - An already-released milestone is left alone; we never rewrite
-     *    a manually-set release date, and moving a card back out of
-     *    done/discarded does not wipe the recorded release.
+     * The check is bidirectional: if a card is moved back out of
+     * done/discarded (or a done card is reassigned away, or the only
+     * remaining resolved cards are discarded), an already-stamped
+     * release date is cleared so the releases page no longer lists a
+     * release that has nothing finished behind it.
+     *
+     * A milestone with zero issues is treated as not released.
      */
     public function refreshReleaseStatus(int $milestoneId): void
     {
         $milestone = $this->find($milestoneId);
-        if ($milestone === null || $milestone['released_at'] !== null) {
+        if ($milestone === null) {
             return;
         }
 
         $stmt = $this->db->pdo()->prepare(
             "SELECT
                  COUNT(*) AS total,
-                 SUM(CASE WHEN status IN ('done', 'discarded') THEN 1 ELSE 0 END) AS finished
+                 SUM(CASE WHEN status IN ('done', 'discarded') THEN 1 ELSE 0 END) AS finished,
+                 SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done
                FROM issues
               WHERE milestone_id = :milestone_id"
         );
@@ -136,11 +147,16 @@ final class Milestones
         }
         $total = (int) $row['total'];
         $finished = (int) $row['finished'];
-        if ($total === 0 || $finished < $total) {
-            return;
-        }
+        $done = (int) $row['done'];
 
-        $this->markReleased($milestoneId, gmdate('Y-m-d'));
+        $shouldBeReleased = $total > 0 && $finished === $total && $done > 0;
+        $isReleased = $milestone['released_at'] !== null;
+
+        if ($shouldBeReleased && !$isReleased) {
+            $this->markReleased($milestoneId, gmdate('Y-m-d'));
+        } elseif (!$shouldBeReleased && $isReleased) {
+            $this->clearRelease($milestoneId);
+        }
     }
 
     public function delete(int $id): void
