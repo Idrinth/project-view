@@ -128,7 +128,7 @@
         // Deep-link support: if the page was opened with a hash like
         // `#issue-42`, pop the detail view for that issue straight away
         // so the URL can be shared as a direct link to a card.
-        maybeOpenIssueFromHash(container);
+        maybeOpenIssueFromHash(container, !!(options && options.user));
 
         // Passively re-fetch the view payload every ~10 minutes so
         // viewers see newly-added cards and edits without reloading.
@@ -1521,7 +1521,7 @@
     // back to the board, but a missing cardEl is tolerated (the issue
     // may be filtered out of the current view, or live on another page)
     // since the modal fetches its own payload from the API.
-    function maybeOpenIssueFromHash(container) {
+    function maybeOpenIssueFromHash(container, canEdit) {
         if (!document.querySelector('[data-detail-overlay]')) {
             return;
         }
@@ -1533,7 +1533,7 @@
         if (container && typeof container.querySelector === 'function') {
             cardEl = container.querySelector('[data-card-id="' + id + '"]');
         }
-        openDetailView(id, cardEl);
+        openDetailView(id, cardEl, canEdit);
     }
 
     // Task detail modal. Shares one overlay (defined in kanban.html)
