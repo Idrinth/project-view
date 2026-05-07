@@ -79,39 +79,45 @@ final class LoginAttempts
     /**
      * Record a failed attempt, incrementing the counter or starting
      * a fresh row when the previous one (if any) has aged out.
+     *
+     * Implemented as a single atomic upsert so two concurrent
+     * failures against the same (username, ip) can't lose an
+     * increment or trip the UNIQUE constraint. The CASE in the
+     * conflict branch preserves the "stale reset" behavior: when
+     * the existing row's last failure is older than the reset
+     * window, the counter goes back to 1 instead of climbing
+     * forever.
+     *
+     * Stale rows for unrelated identities are GC'd here too so the
+     * table stays bounded under a sustained guessing attack from
+     * many distinct (username, ip) tuples.
      */
     public function recordFailure(string $username, string $ip): void
     {
-        $now = gmdate('c');
-        $row = $this->fetchRow($username, $ip);
-        if ($row === null) {
-            $stmt = $this->db->pdo()->prepare(
-                'INSERT INTO login_attempts (username, ip, failures, last_failure_at)
-                 VALUES (:username, :ip, 1, :last_failure_at)'
-            );
-            $stmt->execute([
-                'username'        => $username,
-                'ip'              => $ip,
-                'last_failure_at' => $now,
-            ]);
-            return;
-        }
+        $now    = gmdate('c');
+        $cutoff = gmdate('c', time() - self::RESET_AFTER_SECONDS);
 
-        $previous = isset($row['failures']) ? (int) $row['failures'] : 0;
-        if ($this->isStale($row)) {
-            $previous = 0;
-        }
+        $cleanup = $this->db->pdo()->prepare(
+            'DELETE FROM login_attempts WHERE last_failure_at < :cutoff'
+        );
+        $cleanup->execute(['cutoff' => $cutoff]);
+
         $stmt = $this->db->pdo()->prepare(
-            'UPDATE login_attempts
-                SET failures = :failures,
-                    last_failure_at = :last_failure_at
-              WHERE username = :username AND ip = :ip'
+            'INSERT INTO login_attempts (username, ip, failures, last_failure_at)
+             VALUES (:username, :ip, 1, :now)
+             ON CONFLICT (username, ip) DO UPDATE
+                SET failures = CASE
+                        WHEN login_attempts.last_failure_at < :stale_cutoff THEN 1
+                        ELSE login_attempts.failures + 1
+                    END,
+                    last_failure_at = :now_update'
         );
         $stmt->execute([
-            'failures'        => $previous + 1,
-            'last_failure_at' => $now,
-            'username'        => $username,
-            'ip'              => $ip,
+            'username'     => $username,
+            'ip'           => $ip,
+            'now'          => $now,
+            'now_update'   => $now,
+            'stale_cutoff' => $cutoff,
         ]);
     }
 
