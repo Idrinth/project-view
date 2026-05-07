@@ -18,6 +18,7 @@ declare(strict_types=1);
 namespace ProjectView;
 
 require_once __DIR__ . '/Jwt.php';
+require_once __DIR__ . '/LoginAttempts.php';
 require_once __DIR__ . '/Users.php';
 
 final class Auth
@@ -26,6 +27,8 @@ final class Auth
     private array $config;
 
     private Users $users;
+
+    private ?LoginAttempts $loginAttempts;
 
     /**
      * Guard so the cookie gets re-issued at most once per request even
@@ -40,8 +43,12 @@ final class Auth
      * @param Users|null $users Optional user repository. Primarily
      *   intended for tests; in normal use the constructor builds one
      *   from the default Database connection.
+     * @param LoginAttempts|null $loginAttempts Optional throttle
+     *   bookkeeper. Pass null in tests that don't care about the
+     *   slowdown; production wiring builds one from the default
+     *   Database connection.
      */
-    public function __construct(?array $config = null, ?Users $users = null)
+    public function __construct(?array $config = null, ?Users $users = null, ?LoginAttempts $loginAttempts = null)
     {
         if ($config === null) {
             $path = __DIR__ . '/../config/auth.php';
@@ -68,6 +75,20 @@ final class Auth
         }
 
         $this->users = $users ?? new Users(new Database());
+        $this->loginAttempts = $loginAttempts;
+    }
+
+    /**
+     * Lazily build the LoginAttempts repository so installs that
+     * pre-date the table only touch it once a login actually happens
+     * (and migrate.php has had a chance to run).
+     */
+    private function loginAttempts(): LoginAttempts
+    {
+        if ($this->loginAttempts === null) {
+            $this->loginAttempts = new LoginAttempts(new Database());
+        }
+        return $this->loginAttempts;
     }
 
     public function cookieName(): string
@@ -79,9 +100,24 @@ final class Auth
      * Verify credentials and return a freshly signed JWT, or null on
      * failure. A uniform failure return value avoids leaking whether a
      * username exists.
+     *
+     * Failed attempts are throttled with a progressive delay tracked
+     * per (username, ip) in src/LoginAttempts.php: the delay is paid
+     * up-front so even a guess against a non-existent username feels
+     * the same as a wrong password against a real one. A successful
+     * login clears the counter for the calling identity.
+     *
+     * @param string|null $ip Optional client IP. Defaults to
+     *   $_SERVER['REMOTE_ADDR']; tests can pass a fixed value.
      */
-    public function attempt(string $username, string $password): ?string
+    public function attempt(string $username, string $password, ?string $ip = null): ?string
     {
+        $clientIp = $ip ?? (isset($_SERVER['REMOTE_ADDR']) && is_string($_SERVER['REMOTE_ADDR'])
+            ? $_SERVER['REMOTE_ADDR']
+            : '');
+        $throttle = $this->loginAttempts();
+        $throttle->applyDelay($username, $clientIp);
+
         $user = $this->users->findByUsername($username);
         $hash = is_array($user) && isset($user['password_hash']) && is_string($user['password_hash'])
             ? $user['password_hash']
@@ -89,11 +125,15 @@ final class Auth
         if ($hash === '') {
             // Keep timing roughly constant by still running a verify.
             password_verify($password, '$2y$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvali');
+            $throttle->recordFailure($username, $clientIp);
             return null;
         }
         if (!password_verify($password, $hash)) {
+            $throttle->recordFailure($username, $clientIp);
             return null;
         }
+
+        $throttle->reset($username, $clientIp);
 
         $now = time();
         return Jwt::encode(
