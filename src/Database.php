@@ -553,6 +553,24 @@ final class Database
             )",
             "CREATE INDEX IF NOT EXISTS idx_project_access_user ON project_access(user_id)",
             "CREATE INDEX IF NOT EXISTS idx_project_access_project ON project_access(project_id)",
+
+            // Failed-login bookkeeping for the progressive slowdown in
+            // src/Auth.php. Counts consecutive failures per
+            // (username, ip) so a successful login clears the row and
+            // an attacker cannot wipe another user's counter just by
+            // typing their username from a different machine. Username
+            // is stored verbatim (including unknown ones) so guessing
+            // a non-existent account is throttled the same way as a
+            // wrong password against an existing one.
+            "CREATE TABLE IF NOT EXISTS login_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                ip TEXT NOT NULL,
+                failures INTEGER NOT NULL DEFAULT 0,
+                last_failure_at TEXT NOT NULL,
+                UNIQUE (username, ip)
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_login_attempts_last ON login_attempts(last_failure_at)",
         ];
     }
 }
